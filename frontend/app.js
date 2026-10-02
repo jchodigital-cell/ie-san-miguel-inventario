@@ -50,6 +50,7 @@ const state = {
   users: [],
   movements: [],
   lowStock: [],
+  tools: [],
   kardex: [],
   activeMaterialId: null,
   modal: null,
@@ -127,6 +128,17 @@ async function loadLowStock() {
   state.lowStock = await api.request('/reports/low-stock');
 }
 
+async function loadTools() {
+  const params = new URLSearchParams();
+  if (state.toolFilter) {
+    if (state.toolFilter.q) params.set('q', state.toolFilter.q);
+    if (state.toolFilter.state) params.set('state', state.toolFilter.state);
+    if (state.toolFilter.location) params.set('location', state.toolFilter.location);
+  }
+  const query = params.toString() ? `?${params.toString()}` : '';
+  state.tools = await api.request(`/tools${query}`);
+}
+
 async function loadKardex(id) {
   state.kardex = (await api.request(`/reports/kardex/${id}`)).kardex || [];
 }
@@ -139,6 +151,7 @@ async function loadAll() {
     loadMaterials(),
     loadMovements(),
     loadLowStock(),
+    loadTools(),
     ...(state.user && state.user.role === 'ADMIN' ? [loadUsers()] : []),
   ]);
 }
@@ -205,10 +218,10 @@ function renderLogin() {
 function renderApp() {
   if (!ensureAuth()) return;
   const allowedRoles = state.user.role === 'ADMIN'
-    ? ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes', 'usuarios', 'configuracion', 'versiones']
+    ? ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes', 'usuarios', 'configuracion', 'versiones', 'herramientas']
     : state.user.role === 'RECTOR'
-      ? ['dashboard', 'inventario', 'kardex', 'reportes']
-      : ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes'];
+      ? ['dashboard', 'inventario', 'kardex', 'reportes', 'herramientas']
+      : ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes', 'herramientas'];
   if (!allowedRoles.includes(state.page)) {
     state.page = 'dashboard';
   }
@@ -285,13 +298,14 @@ function menuItemsHtml() {
   const items = [
     { key: 'dashboard', label: 'Dashboard' },
     { key: 'inventario', label: 'Inventario' },
+    { key: 'herramientas', label: 'Herramientas' },
     { key: 'entradas', label: 'Entradas' },
     { key: 'salidas', label: 'Salidas' },
     { key: 'kardex', label: 'Kardex' },
     { key: 'reportes', label: 'Reportes' },
   ];
   if (state.user.role === 'RECTOR') {
-    return items.filter((item) => ['dashboard', 'inventario', 'kardex', 'reportes'].includes(item.key)).map((item) => `
+    return items.filter((item) => ['dashboard', 'inventario', 'kardex', 'reportes', 'herramientas'].includes(item.key)).map((item) => `
     <button class="nav-item ${state.page === item.key ? 'active' : ''}" data-page="${item.key}">${item.label}</button>
   `).join('');
   }
@@ -307,6 +321,7 @@ function pageTitle() {
   const map = {
     dashboard: 'Dashboard',
     inventario: 'Inventario',
+    herramientas: 'Control de Herramientas',
     entradas: 'Entradas',
     salidas: 'Salidas',
     kardex: 'Kardex',
@@ -322,6 +337,7 @@ function renderPage() {
   switch (state.page) {
     case 'dashboard': return renderDashboard();
     case 'inventario': return renderInventory();
+    case 'herramientas': return renderTools();
     case 'entradas': return renderMovements('ENTRADA');
     case 'salidas': return renderMovements('SALIDA');
     case 'kardex': return renderKardex();
@@ -342,6 +358,8 @@ function renderDashboard() {
     { label: 'Materiales agotados', value: summary.agotados ?? 0 },
     { label: 'Total de entradas', value: summary.totalEntradas ?? 0 },
     { label: 'Total de salidas', value: summary.totalSalidas ?? 0 },
+    { label: 'Total de herramientas', value: summary.totalTools ?? 0 },
+    { label: 'Herramientas con novedades', value: summary.toolsMantenimiento ?? 0 },
   ];
 
   return `
@@ -459,6 +477,56 @@ function renderInventory() {
                 </td>
               </tr>
             `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function toolStateBadge(stateValue) {
+  const cls = stateValue === 'BUENA' ? 'normal' : stateValue === 'REGULAR' ? 'bajo' : stateValue === 'MANTENIMIENTO' ? 'mantenimiento' : 'agotado';
+  return `<span class="badge ${cls}">${escapeHtml(stateValue)}</span>`;
+}
+
+function renderTools() {
+  const canManage = state.user.role === 'ADMIN' || state.user.role === 'ALMACENISTA';
+  return `
+    <div class="panel">
+      <div class="section-header">
+        <h3>Herramientas</h3>
+        <div class="toolbar">
+          <input id="search-tool" placeholder="Buscar por código, nombre o marca" value="${escapeHtml(state.toolFilter?.q || '')}" />
+          <select id="filter-tool-state">
+            <option value="">Todos los estados</option>
+            ${['BUENA', 'REGULAR', 'MALA', 'MANTENIMIENTO'].map((s) => `<option value="${s}" ${state.toolFilter?.state === s ? 'selected' : ''}>${s}</option>`).join('')}
+          </select>
+          <button class="secondary-btn" id="apply-tool-filter-btn" type="button">Filtrar</button>
+          ${canManage ? '<button class="primary-btn" id="new-tool-btn" type="button">Nueva herramienta</button>' : ''}
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Código</th><th>Nombre</th><th>Marca</th><th>Cantidad</th><th>Ubicación</th><th>Estado</th><th>Responsable</th><th>Acciones</th></tr>
+          </thead>
+          <tbody>
+            ${state.tools.map((tool) => `
+              <tr>
+                <td>${escapeHtml(tool.code)}</td>
+                <td>${escapeHtml(tool.name)}</td>
+                <td>${escapeHtml(tool.brand || '-')}</td>
+                <td>${tool.quantity}</td>
+                <td>${escapeHtml(tool.location)}</td>
+                <td>${toolStateBadge(tool.state)}</td>
+                <td>${escapeHtml(tool.responsible || '-')}</td>
+                <td>
+                  <button class="small-btn" data-tool-history="${tool.id}" type="button">Historial</button>
+                  ${canManage ? `<button class="small-btn" data-tool-edit="${tool.id}" type="button">Editar</button>` : ''}
+                  ${state.user.role === 'ADMIN' ? `<button class="danger-btn" data-tool-delete="${tool.id}" type="button">Eliminar</button>` : ''}
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="8">No hay herramientas registradas</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -708,6 +776,27 @@ function bindCommonActions() {
   });
 
   document.getElementById('new-material-btn')?.addEventListener('click', openMaterialModal);
+  document.getElementById('new-tool-btn')?.addEventListener('click', () => openToolModal());
+  document.getElementById('apply-tool-filter-btn')?.addEventListener('click', async () => {
+    state.toolFilter = {
+      q: document.getElementById('search-tool')?.value.trim() || '',
+      state: document.getElementById('filter-tool-state')?.value || '',
+    };
+    await loadTools();
+    renderApp();
+  });
+  document.querySelectorAll('[data-tool-edit]').forEach((btn) => btn.addEventListener('click', () => openToolModal(btn.dataset.toolEdit)));
+  document.querySelectorAll('[data-tool-history]').forEach((btn) => btn.addEventListener('click', () => openToolHistoryModal(btn.dataset.toolHistory)));
+  document.querySelectorAll('[data-tool-delete]').forEach((btn) => btn.addEventListener('click', async () => {
+    if (!confirm('¿Eliminar esta herramienta?')) return;
+    try {
+      await api.request(`/tools/${btn.dataset.toolDelete}`, 'DELETE');
+      await loadTools();
+      renderApp();
+    } catch (error) {
+      alert(error.message);
+    }
+  }));
   document.getElementById('new-category-btn')?.addEventListener('click', openCategoryModal);
   document.getElementById('new-user-btn')?.addEventListener('click', openUserModal);
   document.getElementById('new-movement-btn')?.addEventListener('click', (e) => openMovementModal(e.target.dataset.type));
@@ -886,6 +975,132 @@ function openMaterialModal(materialId = null) {
   document.getElementById('close-modal')?.addEventListener('click', () => { state.modal = null; renderApp(); });
 }
 
+function openToolModal(toolId = null) {
+  const tool = toolId ? state.tools.find((t) => t.id === Number(toolId)) : null;
+  state.modal = `
+    <h3>${tool ? 'Editar herramienta' : 'Nueva herramienta'}</h3>
+    <form id="tool-form">
+      <div class="form-row">
+        <div class="field"><label>Código</label><input name="code" value="${escapeHtml(tool?.code || '')}" placeholder="Ej: HERR-001" required /></div>
+        <div class="field"><label>Nombre</label><input name="name" value="${escapeHtml(tool?.name || '')}" placeholder="Ej: Taladro percutor" required /></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Marca</label><input name="brand" value="${escapeHtml(tool?.brand || '')}" placeholder="Ej: Bosch" /></div>
+        <div class="field"><label>Serial</label><input name="serial" value="${escapeHtml(tool?.serial || '')}" placeholder="Ej: SN-2026-001" /></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0" value="${escapeHtml(tool?.quantity ?? 1)}" /></div>
+        <div class="field"><label>Estado</label>
+          <select name="state">
+            ${['BUENA', 'REGULAR', 'MALA', 'MANTENIMIENTO'].map((s) => `<option value="${s}" ${tool?.state === s ? 'selected' : ''}>${s}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Ubicación</label><input name="location" value="${escapeHtml(tool?.location || '')}" placeholder="Ej: Bodega A" required /></div>
+        <div class="field"><label>Responsable</label><input name="responsible" value="${escapeHtml(tool?.responsible || '')}" placeholder="Ej: Coordinación de taller" /></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Fecha de compra</label><input name="acquisition_date" type="date" value="${escapeHtml(tool?.acquisition_date || '')}" /></div>
+        <div class="field"><label>Costo</label><input name="cost" type="number" min="0" step="0.01" value="${escapeHtml(tool?.cost ?? 0)}" /></div>
+      </div>
+      <div class="form-actions">
+        <button class="secondary-btn" type="button" id="close-modal">Cancelar</button>
+        <button class="primary-btn" type="submit">Guardar</button>
+      </div>
+    </form>
+  `;
+  renderApp();
+  document.getElementById('tool-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    try {
+      const payload = {
+        code: form.code.value,
+        name: form.name.value,
+        brand: form.brand.value,
+        serial: form.serial.value,
+        quantity: Number(form.quantity.value),
+        state: form.state.value,
+        location: form.location.value,
+        responsible: form.responsible.value,
+        acquisition_date: form.acquisition_date.value || null,
+        cost: Number(form.cost.value || 0),
+      };
+      await api.request(tool ? `/tools/${tool.id}` : '/tools', tool ? 'PUT' : 'POST', payload);
+      state.modal = null;
+      await loadTools();
+      renderApp();
+    } catch (error) {
+      alert(error.message);
+    }
+  });
+  document.getElementById('close-modal')?.addEventListener('click', () => { state.modal = null; renderApp(); });
+}
+
+async function openToolHistoryModal(toolId) {
+  const tool = state.tools.find((t) => t.id === Number(toolId));
+  let history = [];
+  try {
+    history = await api.request(`/tools/${toolId}/movements`);
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+  const canManage = state.user.role === 'ADMIN' || state.user.role === 'ALMACENISTA';
+  state.modal = `
+    <h3>Historial de ${escapeHtml(tool?.name || 'herramienta')}</h3>
+    ${canManage ? `
+    <form id="tool-movement-form" style="margin-bottom:14px;">
+      <div class="form-row">
+        <div class="field"><label>Tipo</label>
+          <select name="type">
+            ${['INGRESO', 'PRESTAMO', 'DEVOLUCION', 'REVISION', 'BAJA'].map((t) => `<option value="${t}">${t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Responsable</label><input name="responsible" placeholder="Ej: Prof. Juan Pérez" /></div>
+      </div>
+      <div class="field"><label>Observación</label><input name="observation" placeholder="Ej: Préstamo para clase de electricidad" /></div>
+      <div class="form-actions"><button class="primary-btn" type="submit">Registrar movimiento</button></div>
+    </form>` : ''}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tipo</th><th>Responsable</th><th>Observación</th><th>Usuario</th><th>Fecha</th></tr></thead>
+        <tbody>
+          ${history.map((h) => `
+            <tr>
+              <td>${escapeHtml(h.type)}</td>
+              <td>${escapeHtml(h.responsible || '-')}</td>
+              <td>${escapeHtml(h.observation || '-')}</td>
+              <td>${escapeHtml(h.user_name || '-')}</td>
+              <td>${escapeHtml(h.created_at)}</td>
+            </tr>`).join('') || '<tr><td colspan="5">Sin movimientos</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+    <div class="form-actions"><button class="secondary-btn" id="close-modal" type="button">Cerrar</button></div>
+  `;
+  renderApp();
+  if (canManage) {
+    document.getElementById('tool-movement-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.target;
+      try {
+        await api.request(`/tools/${toolId}/movements`, 'POST', {
+          type: form.type.value,
+          responsible: form.responsible.value,
+          observation: form.observation.value,
+        });
+        await loadTools();
+        await openToolHistoryModal(toolId);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  }
+  document.getElementById('close-modal')?.addEventListener('click', () => { state.modal = null; renderApp(); });
+}
+
 function openCategoryModal() {
   state.modal = `
     <h3>Nueva categoría</h3>
@@ -1055,7 +1270,7 @@ function connectSync() {
       if (Date.now() - lastLocalChangeAt < 1500) return; // evitar recargar lo que cambió el propio dispositivo
       if (!localStorage.getItem('token')) return;
       try {
-        const tasks = [loadDashboard(), loadMaterials(), loadMovements(), loadLowStock(), loadCategories()];
+        const tasks = [loadDashboard(), loadMaterials(), loadMovements(), loadLowStock(), loadCategories(), loadTools()];
         if (state.user && state.user.role === 'ADMIN') tasks.push(loadUsers());
         await Promise.all(tasks);
         renderApp();

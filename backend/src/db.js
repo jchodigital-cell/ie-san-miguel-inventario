@@ -73,6 +73,37 @@ function initializeDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS tools (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      brand TEXT,
+      serial TEXT,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      location TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'BUENA' CHECK (state IN ('BUENA', 'REGULAR', 'MALA', 'MANTENIMIENTO')),
+      responsible TEXT,
+      acquisition_date TEXT,
+      cost REAL DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS tool_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tool_id INTEGER NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('INGRESO', 'PRESTAMO', 'DEVOLUCION', 'REVISION', 'BAJA')),
+      responsible TEXT,
+      observation TEXT,
+      user_id INTEGER NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tool_id) REFERENCES tools(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tools_code ON tools(code);
+    CREATE INDEX IF NOT EXISTS idx_tool_movements_tool_id ON tool_movements(tool_id, created_at DESC);
+
     CREATE INDEX IF NOT EXISTS idx_materials_code ON materials(code);
     CREATE INDEX IF NOT EXISTS idx_materials_status ON materials(status);
     CREATE INDEX IF NOT EXISTS idx_movements_material_id ON movements(material_id, created_at DESC);

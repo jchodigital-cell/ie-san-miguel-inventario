@@ -101,6 +101,7 @@ th { background: #f3f7ff; }
 .badge.normal { background: rgba(31,143,95,0.12); color: var(--success); }
 .badge.bajo { background: rgba(255,192,0,0.14); color: #a67200; }
 .badge.agotado { background: rgba(217,63,63,0.12); color: var(--danger); }
+.badge.mantenimiento { background: rgba(122,82,199,0.12); color: #6a45b8; }
 
 .modal { position: fixed; inset: 0; background: rgba(13,25,41,0.5); display: flex; align-items: center; justify-content: center; z-index: 20; }
 .modal-card { background: white; width: min(640px, 90vw); border-radius: 16px; padding: 20px; max-height: 90vh; overflow: auto; }

@@ -1,5 +1,9 @@
 # JCHO Inventario Ferretería
 
+## Módulo de Herramientas
+
+Registra las herramientas existentes y las que ingresen, con código, marca, serial, estado (BUENA/REGULAR/MALA/MANTENIMIENTO), ubicación, responsable y costo. Incluye historial de movimientos: INGRESO, PRESTAMO, DEVOLUCION, REVISION y BAJA. También aparece en el Dashboard (total y novedades) y se sincroniza en vivo entre PC y celular.
+
 ## Institución
 
 Institución Educativa San Miguel

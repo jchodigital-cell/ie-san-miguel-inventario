@@ -184,6 +184,9 @@ app.get('/api/dashboard', authMiddleware, (req, res) => {
       LIMIT 10
     `).all();
 
+    const totalTools = db.prepare('SELECT COUNT(*) AS total FROM tools').get().total;
+    const toolsMantenimiento = db.prepare("SELECT COUNT(*) AS total FROM tools WHERE state = 'MANTENIMIENTO' OR state = 'MALA'").get().total;
+
     return res.json(successResponse({
       totalMaterials,
       activeMaterials,
@@ -193,6 +196,8 @@ app.get('/api/dashboard', authMiddleware, (req, res) => {
       totalSalidas,
       recentMovements,
       lowStockMaterials,
+      totalTools,
+      toolsMantenimiento,
     }));
   } catch (error) {
     return res.status(500).json(errorResponse('Error al obtener el dashboard'));
@@ -511,6 +516,236 @@ app.delete('/api/materials/:id', authMiddleware, requireRole('ADMIN', 'ALMACENIS
     return res.status(500).json(errorResponse('Error al eliminar material'));
   }
 });
+
+// ================= MÓDULO DE HERRAMIENTAS =================
+
+app.get('/api/tools', authMiddleware, (req, res) => {
+  try {
+    const { q, state, location } = req.query;
+    let sql = 'SELECT * FROM tools';
+    const conditions = [];
+    const params = [];
+
+    if (q) {
+      conditions.push('(LOWER(code) LIKE ? OR LOWER(name) LIKE ? OR LOWER(brand) LIKE ?)');
+      const term = `%${String(q).toLowerCase()}%`;
+      params.push(term, term, term);
+    }
+    if (state) {
+      conditions.push('state = ?');
+      params.push(String(state));
+    }
+    if (location) {
+      conditions.push('LOWER(location) LIKE ?');
+      params.push(`%${String(location).toLowerCase()}%`);
+    }
+
+    if (conditions.length) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+    sql += ' ORDER BY created_at DESC';
+
+    return res.json(successResponse(db.prepare(sql).all(...params)));
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al consultar herramientas'));
+  }
+});
+
+function sanitizeToolPayload(payload) {
+  const missing = [];
+  if (!payload.code || !String(payload.code).trim()) missing.push('Código');
+  if (!payload.name || !String(payload.name).trim()) missing.push('Nombre');
+  if (!payload.location || !String(payload.location).trim()) missing.push('Ubicación');
+  if (payload.quantity !== undefined && Number(payload.quantity) < 0) missing.push('Cantidad válida');
+  if (missing.length) {
+    throw new Error(`Faltan campos obligatorios: ${missing.join(', ')}`);
+  }
+}
+
+app.post('/api/tools', authMiddleware, requireRole('ADMIN', 'ALMACENISTA'), (req, res) => {
+  try {
+    const { code, name, brand, serial, quantity, location, state, responsible, acquisition_date, cost } = req.body || {};
+    sanitizeToolPayload({ code, name, location, quantity });
+
+    const existing = db.prepare('SELECT id FROM tools WHERE code = ?').get(String(code).trim());
+    if (existing) {
+      return res.status(409).json(errorResponse('El código de la herramienta ya existe'));
+    }
+
+    const finalState = ['BUENA', 'REGULAR', 'MALA', 'MANTENIMIENTO'].includes(state) ? state : 'BUENA';
+    const finalQuantity = quantity === undefined || quantity === null || quantity === '' ? 1 : Number(quantity);
+    if (!Number.isFinite(finalQuantity) || finalQuantity < 0) {
+      return res.status(400).json(errorResponse('La cantidad no puede ser negativa'));
+    }
+
+    const result = db.prepare(`
+      INSERT INTO tools (code, name, brand, serial, quantity, location, state, responsible, acquisition_date, cost)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      String(code).trim(),
+      String(name).trim(),
+      brand ? String(brand).trim() : null,
+      serial ? String(serial).trim() : null,
+      finalQuantity,
+      String(location).trim(),
+      finalState,
+      responsible ? String(responsible).trim() : null,
+      acquisition_date || null,
+      cost ? Number(cost) : 0
+    );
+
+    db.prepare(`
+      INSERT INTO tool_movements (tool_id, type, responsible, observation, user_id)
+      VALUES (?, 'INGRESO', ?, ?, ?)
+    `).run(result.lastInsertRowid, responsible || null, 'Herramienta registrada en el sistema', req.user.id);
+
+    notifyDataChanged('tools');
+    return res.status(201).json(successResponse(db.prepare('SELECT * FROM tools WHERE id = ?').get(result.lastInsertRowid)));
+  } catch (error) {
+    return res.status(400).json(errorResponse(error.message || 'Error al registrar herramienta'));
+  }
+});
+
+app.put('/api/tools/:id', authMiddleware, requireRole('ADMIN', 'ALMACENISTA'), (req, res) => {
+  try {
+    const toolId = Number(req.params.id);
+    const tool = db.prepare('SELECT * FROM tools WHERE id = ?').get(toolId);
+    if (!tool) {
+      return res.status(404).json(errorResponse('Herramienta no encontrada'));
+    }
+
+    const { code, name, brand, serial, quantity, location, state, responsible, acquisition_date, cost } = req.body || {};
+    const finalCode = code && String(code).trim() ? String(code).trim() : tool.code;
+    const finalName = name && String(name).trim() ? String(name).trim() : tool.name;
+    const finalQuantity = quantity === undefined || quantity === null || quantity === '' ? tool.quantity : Number(quantity);
+    if (!Number.isFinite(finalQuantity) || finalQuantity < 0) {
+      return res.status(400).json(errorResponse('La cantidad no puede ser negativa'));
+    }
+    const finalState = ['BUENA', 'REGULAR', 'MALA', 'MANTENIMIENTO'].includes(state) ? state : tool.state;
+
+    const duplicate = db.prepare('SELECT id FROM tools WHERE code = ? AND id != ?').get(finalCode, toolId);
+    if (duplicate) {
+      return res.status(409).json(errorResponse('El código de la herramienta ya existe'));
+    }
+
+    db.prepare(`
+      UPDATE tools
+      SET code = ?, name = ?, brand = ?, serial = ?, quantity = ?, location = ?, state = ?, responsible = ?, acquisition_date = ?, cost = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      finalCode,
+      finalName,
+      brand !== undefined ? (brand ? String(brand).trim() : null) : tool.brand,
+      serial !== undefined ? (serial ? String(serial).trim() : null) : tool.serial,
+      finalQuantity,
+      location && String(location).trim() ? String(location).trim() : tool.location,
+      finalState,
+      responsible !== undefined ? (responsible ? String(responsible).trim() : null) : tool.responsible,
+      acquisition_date !== undefined ? acquisition_date || null : tool.acquisition_date,
+      cost !== undefined && cost !== '' ? Number(cost) : tool.cost,
+      toolId
+    );
+
+    notifyDataChanged('tools');
+    return res.json(successResponse(db.prepare('SELECT * FROM tools WHERE id = ?').get(toolId)));
+  } catch (error) {
+    return res.status(400).json(errorResponse(error.message || 'Error al actualizar herramienta'));
+  }
+});
+
+app.delete('/api/tools/:id', authMiddleware, requireRole('ADMIN'), (req, res) => {
+  try {
+    const toolId = Number(req.params.id);
+    const tool = db.prepare('SELECT id FROM tools WHERE id = ?').get(toolId);
+    if (!tool) {
+      return res.status(404).json(errorResponse('Herramienta no encontrada'));
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM tool_movements WHERE tool_id = ?').run(toolId);
+      db.prepare('DELETE FROM tools WHERE id = ?').run(toolId);
+    });
+    tx();
+
+    notifyDataChanged('tools');
+    return res.json(successResponse({ deleted: true }));
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al eliminar herramienta'));
+  }
+});
+
+app.get('/api/tools/:id/movements', authMiddleware, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT tm.*, u.full_name AS user_name
+      FROM tool_movements tm
+      LEFT JOIN users u ON u.id = tm.user_id
+      WHERE tm.tool_id = ?
+      ORDER BY tm.created_at DESC
+    `).all(Number(req.params.id));
+    return res.json(successResponse(rows));
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al consultar historial de la herramienta'));
+  }
+});
+
+app.post('/api/tools/:id/movements', authMiddleware, requireRole('ADMIN', 'ALMACENISTA'), (req, res) => {
+  try {
+    const toolId = Number(req.params.id);
+    const tool = db.prepare('SELECT * FROM tools WHERE id = ?').get(toolId);
+    if (!tool) {
+      return res.status(404).json(errorResponse('Herramienta no encontrada'));
+    }
+
+    const { type, responsible, observation } = req.body || {};
+    if (!['INGRESO', 'PRESTAMO', 'DEVOLUCION', 'REVISION', 'BAJA'].includes(type)) {
+      return res.status(400).json(errorResponse('Tipo de movimiento inválido'));
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO tool_movements (tool_id, type, responsible, observation, user_id)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(toolId, type, responsible || null, observation || null, req.user.id);
+
+      if (type === 'PRESTAMO') {
+        db.prepare('UPDATE tools SET responsible = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(responsible || tool.responsible, toolId);
+      }
+      if (type === 'DEVOLUCION') {
+        db.prepare('UPDATE tools SET responsible = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(toolId);
+      }
+      if (type === 'BAJA') {
+        db.prepare("UPDATE tools SET state = 'MALA', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(toolId);
+      }
+      if (type === 'REVISION') {
+        db.prepare("UPDATE tools SET state = 'MANTENIMIENTO', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(toolId);
+      }
+    });
+    tx();
+
+    notifyDataChanged('tools');
+    return res.status(201).json(successResponse({ registered: true }));
+  } catch (error) {
+    return res.status(400).json(errorResponse(error.message || 'Error al registrar movimiento'));
+  }
+});
+
+app.get('/api/reports/tools-summary', authMiddleware, (req, res) => {
+  try {
+    const summary = {
+      total: db.prepare('SELECT COUNT(*) AS total FROM tools').get().total,
+      buenas: db.prepare("SELECT COUNT(*) AS total FROM tools WHERE state = 'BUENA'").get().total,
+      regulares: db.prepare("SELECT COUNT(*) AS total FROM tools WHERE state = 'REGULAR'").get().total,
+      malas: db.prepare("SELECT COUNT(*) AS total FROM tools WHERE state = 'MALA'").get().total,
+      mantenimiento: db.prepare("SELECT COUNT(*) AS total FROM tools WHERE state = 'MANTENIMIENTO'").get().total,
+    };
+    return res.json(successResponse(summary));
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al consultar herramientas'));
+  }
+});
+
+// ================= FIN MÓDULO DE HERRAMIENTAS =================
 
 app.post('/api/movements', authMiddleware, requireRole('ADMIN', 'ALMACENISTA'), (req, res) => {
   try {
