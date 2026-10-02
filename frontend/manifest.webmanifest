@@ -1,0 +1,20 @@
+{
+  "name": "Inventario Ferreteria San Miguel",
+  "short_name": "Inventario",
+  "description": "Sistema de control de inventario de materiales de ferreteria",
+  "lang": "es",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f7fb",
+  "theme_color": "#083764",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

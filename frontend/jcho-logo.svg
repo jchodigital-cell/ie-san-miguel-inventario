@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 140" role="img" aria-labelledby="title desc">
+  <title id="title">JCHO</title>
+  <desc id="desc">Logo de marca JCHO</desc>
+  <rect width="420" height="140" rx="28" fill="#083764"/>
+  <path d="M42 38h30v42c0 12 7 18 18 18s18-6 18-18V38h30v45c0 29-18 45-48 45S42 112 42 83V38z" fill="#f1b41b"/>
+  <path d="M160 38h28v34h38V38h28v86h-28V96h-38v28h-28zM274 38h66c25 0 39 16 39 43v0c0 27-14 43-39 43h-66V38zm29 24v38h32c10 0 15-7 15-19v0c0-12-5-19-15-19h-32z" fill="#fff"/>
+</svg>
