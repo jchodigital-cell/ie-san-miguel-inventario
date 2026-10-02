@@ -44,6 +44,11 @@ http://localhost:3000
   - Contraseña: `almacen123`
   - Rol: `ALMACENISTA`
 
+- Usuario: `rector`
+  - Contraseña: `rector123`
+  - Rol: `RECTOR`
+  - Permisos: solo consulta (Dashboard, Inventario, Kardex y Reportes)
+
 ## Roles y permisos
 
 ### ADMIN
@@ -100,6 +105,16 @@ git add .
 git commit -m "Descripción del cambio"
 git push
 ```
+
+## Acceso directo de escritorio
+
+Hay un acceso directo **JCHO Inventario Ferreteria** en el escritorio. Al abrirlo:
+
+1. Ejecuta el seed si es la primera vez.
+2. Inicia el servidor.
+3. Abre el navegador en `http://localhost:3000`.
+
+También puedes ejecutar manualmente el archivo `iniciar.bat` de la carpeta del proyecto.
 
 ## Respaldo de SQLite
 

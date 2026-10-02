@@ -45,6 +45,14 @@ function ensureSeed() {
     `).run('admin', hashPassword('admin123'), 'Administrador Principal', 'ADMIN');
   }
 
+  const rectorExists = db.prepare('SELECT id FROM users WHERE username = ?').get('rector');
+  if (!rectorExists) {
+    db.prepare(`
+      INSERT INTO users (username, password_hash, full_name, role, is_active)
+      VALUES (?, ?, ?, ?, 1)
+    `).run('rector', hashPassword('rector123'), 'Rectoría IE San Miguel', 'RECTOR');
+  }
+
   const almacenistaExists = db.prepare('SELECT id FROM users WHERE username = ?').get('almacenista');
   if (!almacenistaExists) {
     db.prepare(`

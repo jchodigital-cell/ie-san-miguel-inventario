@@ -224,7 +224,7 @@ app.post('/api/users', authMiddleware, requireRole('ADMIN'), (req, res) => {
       return res.status(409).json(errorResponse('El nombre de usuario ya existe'));
     }
 
-    const finalRole = role === 'ALMACENISTA' ? 'ALMACENISTA' : 'ADMIN';
+    const finalRole = role === 'ALMACENISTA' ? 'ALMACENISTA' : role === 'RECTOR' ? 'RECTOR' : 'ADMIN';
     const passwordHash = hashPassword(String(password));
     const result = db.prepare(`
       INSERT INTO users (username, password_hash, full_name, role, is_active)
@@ -287,7 +287,7 @@ app.put('/api/users/:id', authMiddleware, requireRole('ADMIN'), (req, res) => {
 
     const finalUsername = username && String(username).trim() ? String(username).trim() : existing.username;
     const finalFullName = full_name && String(full_name).trim() ? String(full_name).trim() : existing.full_name;
-    const finalRole = role === 'ALMACENISTA' || role === 'ADMIN' ? role : existing.role;
+    const finalRole = role === 'ALMACENISTA' || role === 'ADMIN' || role === 'RECTOR' ? role : existing.role;
     const finalActive = is_active === false || is_active === 0 ? 0 : 1;
 
     if (existing.username !== finalUsername) {
@@ -512,7 +512,7 @@ app.delete('/api/materials/:id', authMiddleware, requireRole('ADMIN', 'ALMACENIS
   }
 });
 
-app.post('/api/movements', authMiddleware, (req, res) => {
+app.post('/api/movements', authMiddleware, requireRole('ADMIN', 'ALMACENISTA'), (req, res) => {
   try {
     const { material_id, type, quantity, unit_cost, reference, responsible, observation } = req.body || {};
 

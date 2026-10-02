@@ -204,7 +204,11 @@ function renderLogin() {
 
 function renderApp() {
   if (!ensureAuth()) return;
-  const allowedRoles = state.user.role === 'ADMIN' ? ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes', 'usuarios', 'configuracion', 'versiones'] : ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes'];
+  const allowedRoles = state.user.role === 'ADMIN'
+    ? ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes', 'usuarios', 'configuracion', 'versiones']
+    : state.user.role === 'RECTOR'
+      ? ['dashboard', 'inventario', 'kardex', 'reportes']
+      : ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes'];
   if (!allowedRoles.includes(state.page)) {
     state.page = 'dashboard';
   }
@@ -286,6 +290,11 @@ function menuItemsHtml() {
     { key: 'kardex', label: 'Kardex' },
     { key: 'reportes', label: 'Reportes' },
   ];
+  if (state.user.role === 'RECTOR') {
+    return items.filter((item) => ['dashboard', 'inventario', 'kardex', 'reportes'].includes(item.key)).map((item) => `
+    <button class="nav-item ${state.page === item.key ? 'active' : ''}" data-page="${item.key}">${item.label}</button>
+  `).join('');
+  }
   if (state.user.role === 'ADMIN') {
     items.push({ key: 'usuarios', label: 'Usuarios' }, { key: 'configuracion', label: 'Configuración' }, { key: 'versiones', label: 'Versiones (GitHub)' });
   }
@@ -986,6 +995,7 @@ function openUserModal(userId = null) {
           <select name="role">
             <option value="ADMIN" ${user?.role === 'ADMIN' ? 'selected' : ''}>ADMIN</option>
             <option value="ALMACENISTA" ${user?.role === 'ALMACENISTA' ? 'selected' : ''}>ALMACENISTA</option>
+            <option value="RECTOR" ${user?.role === 'RECTOR' ? 'selected' : ''}>RECTOR</option>
           </select>
         </div>
         <div class="field"><label>Contraseña ${user ? '(opcional)' : ''}</label><input name="password" type="password" placeholder="Ej: min 6 caracteres" ${user ? '' : 'required'} /></div>

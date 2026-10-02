@@ -31,7 +31,7 @@ function initializeDatabase() {
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       full_name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('ADMIN', 'ALMACENISTA')),
+      role TEXT NOT NULL CHECK (role IN ('ADMIN', 'ALMACENISTA', 'RECTOR')),
       is_active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
