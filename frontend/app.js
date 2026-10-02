@@ -204,7 +204,7 @@ function renderLogin() {
 
 function renderApp() {
   if (!ensureAuth()) return;
-  const allowedRoles = state.user.role === 'ADMIN' ? ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes', 'usuarios', 'configuracion'] : ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes'];
+  const allowedRoles = state.user.role === 'ADMIN' ? ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes', 'usuarios', 'configuracion', 'versiones'] : ['dashboard', 'inventario', 'entradas', 'salidas', 'kardex', 'reportes'];
   if (!allowedRoles.includes(state.page)) {
     state.page = 'dashboard';
   }
@@ -240,6 +240,7 @@ function renderApp() {
   `;
 
   document.getElementById('logout-btn').addEventListener('click', logout);
+  updateSyncIndicator(lastClients, syncConnected);
   document.querySelectorAll('[data-page]').forEach((button) => {
     button.addEventListener('click', async () => {
       state.page = button.dataset.page;
@@ -1030,14 +1031,16 @@ async function loadKardexAndRender(id) {
 
 let syncSocket = null;
 let lastLocalChangeAt = 0;
+let syncConnected = false;
+let lastClients = 0;
 
 function connectSync() {
   if (typeof io === 'undefined') return;
   try {
     syncSocket = io();
-    syncSocket.on('sync:clients', ({ clients }) => updateSyncIndicator(clients));
-    syncSocket.on('connect', () => updateSyncIndicator(1, true));
-    syncSocket.on('disconnect', () => updateSyncIndicator(0, false));
+    syncSocket.on('sync:clients', ({ clients }) => { lastClients = clients; syncConnected = true; updateSyncIndicator(clients); });
+    syncSocket.on('connect', () => { syncConnected = true; updateSyncIndicator(1, true); });
+    syncSocket.on('disconnect', () => { syncConnected = false; updateSyncIndicator(0, false); });
     syncSocket.on('data:changed', async (payload) => {
       if (Date.now() - lastLocalChangeAt < 1500) return; // evitar recargar lo que cambió el propio dispositivo
       if (!localStorage.getItem('token')) return;

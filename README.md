@@ -8,12 +8,14 @@ Institución Educativa San Miguel
 
 - Node.js
 - Express
+- Socket.io (sincronización en vivo entre PC y celular)
 - SQLite con better-sqlite3
 - JWT
 - bcryptjs
 - ExcelJS
 - PDFKit
-- HTML5, CSS3 y JavaScript vanilla
+- HTML5, CSS3 y JavaScript vanilla (responsive, PWA)
+- Git / GitHub (control de versiones integrado)
 
 ## Instalación
 
@@ -69,6 +71,35 @@ http://localhost:3000
 5. El logo se usará en el encabezado, el login y los reportes exportados.
 
 Se recomienda usar imágenes pequeñas para mantener el archivo ligero.
+
+## Acceso desde el celular (misma red WiFi)
+
+1. Ejecuta `npm run dev` en la PC.
+2. Averigua la IP local de la PC (en Windows: `ipconfig`, busca "Dirección IPv4").
+3. En el celular abre el navegador y entra a `http://<IP-DE-LA-PC>:3000`.
+4. También puedes "Agregar a pantalla de inicio" para usarlo como app (PWA).
+
+## Sincronización en vivo PC ↔ Celular
+
+Cuando un usuario registra, edita o elimina datos desde cualquier dispositivo, todos los demás dispositivos conectados se actualizan automáticamente (Socket.io). En la barra superior se muestra el indicador "● En vivo · N dispositivo(s) conectado(s)".
+
+## Control de versiones (GitHub)
+
+El módulo **Versiones (GitHub)** del menú (rol ADMIN) muestra la rama actual, los cambios pendientes y los últimos commits. Para subir el proyecto a GitHub:
+
+```bash
+git remote add origin https://github.com/TU_USUARIO/TU_REPOSITORIO.git
+git branch -M main
+git push -u origin main
+```
+
+Después de cada mejora:
+
+```bash
+git add .
+git commit -m "Descripción del cambio"
+git push
+```
 
 ## Respaldo de SQLite
 

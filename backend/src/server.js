@@ -917,11 +917,11 @@ app.get('/api/versioning', authMiddleware, requireRole('ADMIN'), (req, res) => {
         return { name, url, type: type || '' };
       });
     const statusShort = run('git status --short') || '';
-    const commits = (run('git log --pretty=format:%h\t%s\t%an\t%ad --date=short -15') || '')
+    const commits = (run('git log --pretty=format:"%h|%s|%an|%ad" --date=short -15') || '')
       .split('\n')
       .filter(Boolean)
       .map((line) => {
-        const [hash, message, author, date] = line.split('\t');
+        const [hash, message, author, date] = line.split('|');
         return { hash, message, author, date };
       });
 
