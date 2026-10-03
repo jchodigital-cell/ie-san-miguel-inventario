@@ -300,6 +300,23 @@ async function localApi(path, method, body) {
     cloudData.categories.push(category);
     return saveAnd(category);
   }
+  if (path.startsWith('/categories/') && method === 'PUT') {
+    const id = Number(path.split('/').pop());
+    const category = cloudData.categories.find((c) => c.id === id);
+    if (!category) throw new Error('Categoría no encontrada');
+    if (!body.name || !String(body.name).trim()) throw new Error('El nombre de la categoría es obligatorio');
+    const duplicate = cloudData.categories.find((c) => c.name === String(body.name).trim() && c.id !== id);
+    if (duplicate) throw new Error('La categoría ya existe');
+    category.name = String(body.name).trim();
+    return saveAnd(category);
+  }
+  if (path.startsWith('/categories/') && method === 'DELETE') {
+    const id = Number(path.split('/').pop());
+    const inUse = cloudData.materials.some((m) => m.category_id === id);
+    if (inUse) throw new Error('No se puede eliminar una categoría con materiales asociados');
+    cloudData.categories = cloudData.categories.filter((c) => c.id !== id);
+    return saveAnd({ deleted: true });
+  }
 
   // MATERIALS
   if (path === '/materials' && method === 'POST') {
@@ -877,7 +894,7 @@ function renderInventory() {
       <div class="panel empty-state">
         <h3>Inventario listo para comenzar</h3>
         <p>No hay materiales registrados. Agregue el primer material para comenzar a controlar sus existencias.</p>
-        ${state.user.role === 'ADMIN' ? '<button class="secondary-btn" id="new-category-btn" type="button">Crear categoría</button>' : ''}
+        ${(state.user.role === 'ADMIN' || state.user.role === 'ALMACENISTA') ? '<button class="secondary-btn" id="new-category-btn" type="button">Crear categoría</button>' : ''}
         ${canCreate ? '<button class="primary-btn" id="new-material-btn" type="button">Agregar primer material</button>' : ''}
       </div>
     `;
@@ -900,7 +917,7 @@ function renderInventory() {
             <option value="AGOTADO" ${state.filter?.status === 'AGOTADO' ? 'selected' : ''}>AGOTADO</option>
           </select>
           <button class="secondary-btn" id="apply-filter-btn">Filtrar</button>
-          ${state.user.role === 'ADMIN' ? '<button class="secondary-btn" id="new-category-btn" type="button">Nueva categoría</button>' : ''}
+          ${(state.user.role === 'ADMIN' || state.user.role === 'ALMACENISTA') ? '<button class="secondary-btn" id="manage-categories-btn" type="button">Categorías</button><button class="secondary-btn" id="new-category-btn" type="button">Nueva categoría</button>' : ''}
           ${(state.user.role === 'ADMIN' || state.user.role === 'ALMACENISTA') ? '<button class="primary-btn" id="new-material-btn">Nuevo material</button>' : ''}
         </div>
       </div>
@@ -1248,6 +1265,7 @@ function bindCommonActions() {
     }
   }));
   document.getElementById('new-category-btn')?.addEventListener('click', openCategoryModal);
+  document.getElementById('manage-categories-btn')?.addEventListener('click', openCategoriesModal);
   document.getElementById('new-user-btn')?.addEventListener('click', openUserModal);
   document.getElementById('new-movement-btn')?.addEventListener('click', (e) => openMovementModal(e.target.dataset.type));
   document.getElementById('export-excel-btn')?.addEventListener('click', exportExcel);
@@ -1605,6 +1623,72 @@ async function openToolHistoryModal(toolId) {
       }
     });
   }
+  document.getElementById('close-modal')?.addEventListener('click', () => { state.modal = null; renderApp(); });
+}
+
+function openCategoriesModal() {
+  state.modal = `
+    <h3>Categorías</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nombre</th><th>Acciones</th></tr></thead>
+        <tbody>
+          ${state.categories.map((cat) => `
+            <tr>
+              <td>${escapeHtml(cat.name)}</td>
+              <td>
+                <button class="small-btn" data-category-edit="${cat.id}" type="button">Editar</button>
+                ${state.user.role === 'ADMIN' ? `<button class="danger-btn" data-category-delete="${cat.id}" type="button">Eliminar</button>` : ''}
+              </td>
+            </tr>`).join('') || '<tr><td colspan="2">No hay categorías</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+    <div class="form-actions"><button class="secondary-btn" id="close-modal" type="button">Cerrar</button></div>
+  `;
+  renderApp();
+  document.querySelectorAll('[data-category-edit]').forEach((btn) => btn.addEventListener('click', () => openCategoryEditModal(Number(btn.dataset.categoryEdit))));
+  document.querySelectorAll('[data-category-delete]').forEach((btn) => btn.addEventListener('click', async () => {
+    if (!confirm('¿Eliminar esta categoría?')) return;
+    try {
+      await api.request(`/categories/${btn.dataset.categoryDelete}`, 'DELETE');
+      await loadCategories();
+      openCategoriesModal();
+    } catch (error) {
+      alert(error.message);
+    }
+  }));
+  document.getElementById('close-modal')?.addEventListener('click', () => { state.modal = null; renderApp(); });
+}
+
+function openCategoryEditModal(categoryId) {
+  const category = state.categories.find((c) => c.id === Number(categoryId));
+  if (!category) return;
+  state.modal = `
+    <h3>Editar categoría</h3>
+    <form id="category-edit-form">
+      <div class="field">
+        <label for="category-edit-name">Nombre</label>
+        <input id="category-edit-name" name="name" value="${escapeHtml(category.name)}" required />
+      </div>
+      <div class="form-actions">
+        <button class="secondary-btn" type="button" id="close-modal">Cancelar</button>
+        <button class="primary-btn" type="submit">Guardar</button>
+      </div>
+    </form>
+  `;
+  renderApp();
+  document.getElementById('category-edit-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await api.request(`/categories/${categoryId}`, 'PUT', { name: event.target.name.value });
+      state.modal = null;
+      await loadCategories();
+      renderApp();
+    } catch (error) {
+      alert(error.message);
+    }
+  });
   document.getElementById('close-modal')?.addEventListener('click', () => { state.modal = null; renderApp(); });
 }
 

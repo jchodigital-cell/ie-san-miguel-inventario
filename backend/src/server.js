@@ -329,7 +329,7 @@ app.get('/api/categories', authMiddleware, (req, res) => {
   }
 });
 
-app.post('/api/categories', authMiddleware, requireRole('ADMIN'), (req, res) => {
+app.post('/api/categories', authMiddleware, requireRole('ADMIN', 'ALMACENISTA'), (req, res) => {
   try {
     const { name } = req.body || {};
     if (!name || !String(name).trim()) {
@@ -347,6 +347,54 @@ app.post('/api/categories', authMiddleware, requireRole('ADMIN'), (req, res) => 
     return res.status(201).json(successResponse(category));
   } catch (error) {
     return res.status(500).json(errorResponse('Error al crear categoría'));
+  }
+});
+
+app.put('/api/categories/:id', authMiddleware, requireRole('ADMIN', 'ALMACENISTA'), (req, res) => {
+  try {
+    const categoryId = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM categories WHERE id = ?').get(categoryId);
+    if (!existing) {
+      return res.status(404).json(errorResponse('Categoría no encontrada'));
+    }
+
+    const { name } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json(errorResponse('El nombre de la categoría es obligatorio'));
+    }
+
+    const duplicate = db.prepare('SELECT id FROM categories WHERE name = ? AND id != ?').get(String(name).trim(), categoryId);
+    if (duplicate) {
+      return res.status(409).json(errorResponse('La categoría ya existe'));
+    }
+
+    db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(String(name).trim(), categoryId);
+    const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(categoryId);
+    notifyDataChanged('categories');
+    return res.json(successResponse(category));
+  } catch (error) {
+    return res.status(400).json(errorResponse(error.message || 'Error al actualizar categoría'));
+  }
+});
+
+app.delete('/api/categories/:id', authMiddleware, requireRole('ADMIN'), (req, res) => {
+  try {
+    const categoryId = Number(req.params.id);
+    const existing = db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId);
+    if (!existing) {
+      return res.status(404).json(errorResponse('Categoría no encontrada'));
+    }
+
+    const inUse = db.prepare('SELECT COUNT(*) AS count FROM materials WHERE category_id = ?').get(categoryId).count;
+    if (inUse > 0) {
+      return res.status(400).json(errorResponse('No se puede eliminar una categoría con materiales asociados'));
+    }
+
+    db.prepare('DELETE FROM categories WHERE id = ?').run(categoryId);
+    notifyDataChanged('categories');
+    return res.json(successResponse({ deleted: true }));
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al eliminar categoría'));
   }
 });
 
