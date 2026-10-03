@@ -1,7 +1,7 @@
 {
-  "name": "Inventario Ferreteria San Miguel",
+  "name": "Inventario Ferreteria IE San Miguel",
   "short_name": "Inventario",
-  "description": "Sistema de control de inventario de materiales de ferreteria",
+  "description": "Sistema de control de inventario de materiales de ferretería y herramientas - IE San Miguel",
   "lang": "es",
   "start_url": ".",
   "scope": ".",
@@ -11,9 +11,15 @@
   "theme_color": "#083764",
   "icons": [
     {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
