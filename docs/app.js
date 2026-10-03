@@ -43,12 +43,27 @@ async function defaultCloudData() {
   };
 }
 
+function normalizeCloudData(data) {
+  const base = {
+    institution: cloudData && cloudData.institution ? cloudData.institution : undefined,
+    users: [],
+    categories: [],
+    materials: [],
+    movements: [],
+    tools: [],
+    tool_movements: [],
+    lastUpdated: 0,
+  };
+  const normalized = Object.assign({}, base, data);
+  return normalized;
+}
+
 async function cloudLoad() {
   try {
     const response = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
     const data = await response.json();
     if (data && data.institution) {
-      cloudData = data;
+      cloudData = normalizeCloudData(data);
       localVersion = data.lastUpdated || 0;
     } else {
       cloudData = await defaultCloudData();
@@ -57,7 +72,7 @@ async function cloudLoad() {
   } catch (error) {
     lastCloudError = error;
     const cached = localStorage.getItem('ie-inventario-cache');
-    cloudData = cached ? JSON.parse(cached) : await defaultCloudData();
+    cloudData = cached ? normalizeCloudData(JSON.parse(cached)) : await defaultCloudData();
   }
 }
 
@@ -1757,7 +1772,7 @@ async function refreshFromCloud() {
     const data = await response.json();
     if (data && data.lastUpdated && data.lastUpdated > localVersion) {
       if (state.modal) return; // no interrumpir si hay una ventana abierta
-      cloudData = data;
+      cloudData = normalizeCloudData(data);
       localVersion = data.lastUpdated;
       localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
       if (localStorage.getItem('token')) {
