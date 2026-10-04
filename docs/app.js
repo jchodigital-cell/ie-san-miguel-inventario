@@ -1203,13 +1203,18 @@ function renderVersiones() {
     return `
       <div class="panel">
         <div class="section-header"><h3>Control de Versiones (GitHub)</h3></div>
-        <p>El proyecto aún no tiene GitHub configurado. Ejecuta estos comandos en la raíz del proyecto:</p>
-        <pre class="code-block">git init
-git add .
-git commit -m "Versión inicial JCHO Inventario Ferretería"
-git remote add origin https://github.com/TU_USUARIO/TU_REPOSITORIO.git
-git branch -M main
-git push -u origin main</pre>
+        <p>Proyecto conectado al repositorio de GitHub:</p>
+        <table>
+          <tbody>
+            <tr><td><strong>Repositorio</strong></td><td><a href="https://github.com/jchodigital-cell/ie-san-miguel-inventario" target="_blank" style="color:var(--primary);">https://github.com/jchodigital-cell/ie-san-miguel-inventario</a></td></tr>
+            <tr><td><strong>Rama</strong></td><td><code>main</code></td></tr>
+            <tr><td><strong>Despliegue (Pages)</strong></td><td><a href="https://jchodigital-cell.github.io/ie-san-miguel-inventario/" target="_blank" style="color:var(--primary);">https://jchodigital-cell.github.io/ie-san-miguel-inventario/</a></td></tr>
+          </tbody>
+        </table>
+        <p>Para ver los últimos commits y publicar cambios, usa:</p>
+        <pre class="code-block">git add .
+git commit -m "Descripción del cambio"
+git push origin main</pre>
       </div>`;
   }
   return `
