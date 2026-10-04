@@ -1101,6 +1101,126 @@ app.get('/api/reports/export/excel', authMiddleware, (req, res) => {
   }
 });
 
+app.get('/api/reports/export/tools-excel', authMiddleware, (req, res) => {
+  try {
+    const institution = getInstitution();
+    const { state, q, ids } = req.query;
+    let items = db.prepare('SELECT * FROM tools ORDER BY name ASC').all();
+    if (state) items = items.filter((t) => t.state === state);
+    if (q) {
+      const term = String(q).toLowerCase();
+      items = items.filter((t) => (t.name + ' ' + t.code + ' ' + (t.brand || '')).toLowerCase().includes(term));
+    }
+    if (ids) {
+      const idsSet = String(ids).split(',').map(Number);
+      items = items.filter((t) => idsSet.includes(t.id));
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Herramientas');
+
+    worksheet.mergeCells('A1:J1');
+    worksheet.getCell('A1').value = institution.name;
+    worksheet.getCell('A1').font = { bold: true, size: 16 };
+    worksheet.getCell('A1').alignment = { horizontal: 'center' };
+
+    worksheet.mergeCells('A2:J2');
+    worksheet.getCell('A2').value = 'Reporte de Herramientas';
+    worksheet.getCell('A2').alignment = { horizontal: 'center' };
+
+    worksheet.mergeCells('A3:J3');
+    worksheet.getCell('A3').value = `Generado: ${new Date().toLocaleString('es-ES')}${state ? ' · Estado: ' + state : ''}`;
+    worksheet.getCell('A3').alignment = { horizontal: 'right' };
+
+    worksheet.columns = [
+      { header: 'Código', key: 'code', width: 16 },
+      { header: 'Nombre', key: 'name', width: 26 },
+      { header: 'Marca', key: 'brand', width: 16 },
+      { header: 'Serial', key: 'serial', width: 18 },
+      { header: 'Cantidad', key: 'quantity', width: 12 },
+      { header: 'Estado', key: 'state', width: 14 },
+      { header: 'Ubicación', key: 'location', width: 18 },
+      { header: 'Responsable', key: 'responsible', width: 24 },
+      { header: 'Fecha compra', key: 'acquisition_date', width: 16 },
+      { header: 'Costo', key: 'cost', width: 16 },
+    ];
+
+    items.forEach((t) => worksheet.addRow({
+      code: t.code, name: t.name, brand: t.brand, serial: t.serial, quantity: t.quantity,
+      state: t.state, location: t.location, responsible: t.responsible,
+      acquisition_date: t.acquisition_date, cost: t.cost,
+    }));
+    worksheet.getRow(4).font = { bold: true };
+    worksheet.views = [{ state: 'frozen', ySplit: 4 }];
+    worksheet.eachRow((row) => {
+      row.alignment = { vertical: 'middle', horizontal: 'center' };
+      row.eachCell((cell) => { cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } }; });
+    });
+
+    const fileName = 'Herramientas_San_Miguel.xlsx';
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    workbook.xlsx.write(res).then(() => res.end());
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al exportar Excel de herramientas'));
+  }
+});
+
+app.get('/api/reports/export/tools-pdf', authMiddleware, (req, res) => {
+  try {
+    const institution = getInstitution();
+    const { state, q, ids } = req.query;
+    let items = db.prepare('SELECT * FROM tools ORDER BY name ASC').all();
+    if (state) items = items.filter((t) => t.state === state);
+    if (q) {
+      const term = String(q).toLowerCase();
+      items = items.filter((t) => (t.name + ' ' + t.code + ' ' + (t.brand || '')).toLowerCase().includes(term));
+    }
+    if (ids) {
+      const idsSet = String(ids).split(',').map(Number);
+      items = items.filter((t) => idsSet.includes(t.id));
+    }
+
+    const doc = new PDFDocument({ margin: 30, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="Herramientas_San_Miguel.pdf"');
+    doc.pipe(res);
+
+    if (institution.logo_data) {
+      try {
+        const buffer = Buffer.from(institution.logo_data.split(',')[1], 'base64');
+        doc.image(buffer, 30, 30, { width: 60, height: 60 });
+      } catch (error) { /* ignorar */ }
+    }
+
+    doc.fontSize(18).text(institution.name, 110, 35);
+    doc.fontSize(10).text('Reporte de Herramientas', 110, 60);
+    doc.fontSize(9).text(`Fecha de generación: ${new Date().toLocaleString('es-ES')}${state ? ' · Estado: ' + state : ''}`, 30, 110);
+
+    const tableTop = 150;
+    const columnPositions = [30, 95, 175, 240, 290, 345, 410, 490];
+    const headers = ['Código', 'Nombre', 'Marca', 'Serial', 'Cant.', 'Estado', 'Ubicación', 'Responsable'];
+
+    doc.fontSize(9).font('Helvetica-Bold');
+    headers.forEach((header, index) => doc.text(header, columnPositions[index], tableTop, { width: 55, align: 'left' }));
+    doc.moveTo(30, tableTop + 12).lineTo(560, tableTop + 12).stroke();
+    doc.font('Helvetica');
+
+    items.forEach((row, index) => {
+      const y = tableTop + 25 + index * 18;
+      if (y > 720) doc.addPage();
+      const values = [row.code, row.name, row.brand || '-', row.serial || '-', String(row.quantity), row.state, row.location, row.responsible || '-'];
+      values.forEach((value, idx) => doc.text(String(value || ''), columnPositions[idx], y, { width: idx === 1 ? 75 : 55, ellipsis: true }));
+    });
+
+    doc.text('Sistema de Inventario', 30, 760);
+    doc.text('IE San Miguel', 430, 760);
+    doc.end();
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al exportar PDF de herramientas'));
+  }
+});
+
 app.get('/api/reports/export/pdf', authMiddleware, (req, res) => {
   try {
     const institution = getInstitution();

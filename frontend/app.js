@@ -508,7 +508,7 @@ function renderTools() {
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Código</th><th>Nombre</th><th>Marca</th><th>Cantidad</th><th>Ubicación</th><th>Estado</th><th>Responsable</th><th>Acciones</th></tr>
+            <tr><th>Código</th><th>Nombre</th><th>Marca</th><th>Serial</th><th>Cantidad</th><th>Ubicación</th><th>Estado</th><th>Responsable</th><th>Acciones</th></tr>
           </thead>
           <tbody>
             ${state.tools.map((tool) => `
@@ -516,6 +516,7 @@ function renderTools() {
                 <td>${escapeHtml(tool.code)}</td>
                 <td>${escapeHtml(tool.name)}</td>
                 <td>${escapeHtml(tool.brand || '-')}</td>
+                <td>${escapeHtml(tool.serial || '-')}</td>
                 <td>${tool.quantity}</td>
                 <td>${escapeHtml(tool.location)}</td>
                 <td>${toolStateBadge(tool.state)}</td>
@@ -526,7 +527,7 @@ function renderTools() {
                   ${state.user.role === 'ADMIN' ? `<button class="danger-btn" data-tool-delete="${tool.id}" type="button">Eliminar</button>` : ''}
                 </td>
               </tr>
-            `).join('') || '<tr><td colspan="8">No hay herramientas registradas</td></tr>'}
+            `).join('') || '<tr><td colspan="9">No hay herramientas registradas</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -623,6 +624,36 @@ function renderReports() {
             <tr><td>Stock bajo</td><td>${state.lowStock.length}</td></tr>
             <tr><td>Movimientos</td><td>${state.movements.length}</td></tr>
             <tr><td>Inventario</td><td>${state.materials.length}</td></tr>
+            <tr><td>Herramientas</td><td>${state.tools.length}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="section-header">
+        <h3>Reporte de Herramientas</h3>
+        <div class="toolbar">
+          <button class="primary-btn" id="export-tools-excel-btn">EXPORTAR EXCEL</button>
+          <button class="secondary-btn" id="export-tools-pdf-btn">EXPORTAR PDF</button>
+        </div>
+      </div>
+      <p style="color:var(--muted); font-size:0.85rem;">Seleccione las herramientas que desea exportar:</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th><input type="checkbox" id="select-all-tools" checked /></th><th>Código</th><th>Nombre</th><th>Marca</th><th>Serial</th><th>Estado</th><th>Ubicación</th></tr>
+          </thead>
+          <tbody>
+            ${state.tools.map((t) => `
+              <tr>
+                <td><input type="checkbox" class="tool-export-check" value="${t.id}" checked /></td>
+                <td>${escapeHtml(t.code)}</td>
+                <td>${escapeHtml(t.name)}</td>
+                <td>${escapeHtml(t.brand || '-')}</td>
+                <td>${escapeHtml(t.serial || '-')}</td>
+                <td>${toolStateBadge(t.state)}</td>
+                <td>${escapeHtml(t.location)}</td>
+              </tr>`).join('') || '<tr><td colspan="7">No hay herramientas</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -803,6 +834,11 @@ function bindCommonActions() {
   document.getElementById('new-movement-btn')?.addEventListener('click', (e) => openMovementModal(e.target.dataset.type));
   document.getElementById('export-excel-btn')?.addEventListener('click', exportExcel);
   document.getElementById('export-pdf-btn')?.addEventListener('click', exportPdf);
+  document.getElementById('select-all-tools')?.addEventListener('change', (e) => {
+    document.querySelectorAll('.tool-export-check').forEach((cb) => { cb.checked = e.target.checked; });
+  });
+  document.getElementById('export-tools-excel-btn')?.addEventListener('click', exportToolsExcel);
+  document.getElementById('export-tools-pdf-btn')?.addEventListener('click', exportToolsPdf);
   document.getElementById('institution-form')?.addEventListener('submit', handleInstitutionSubmit);
   document.getElementById('logo-input')?.addEventListener('change', readLogoFile);
   document.getElementById('brand-logo-input')?.addEventListener('change', readBrandLogoFile);
@@ -918,6 +954,18 @@ async function exportExcel() {
 async function exportPdf() {
   const token = api.getToken();
   window.open(`/api/reports/export/pdf?token=${encodeURIComponent(token)}`, '_blank');
+}
+
+async function exportToolsExcel() {
+  const ids = Array.from(document.querySelectorAll('.tool-export-check:checked')).map((cb) => cb.value).join(',');
+  const token = api.getToken();
+  window.open(`/api/reports/export/tools-excel?token=${encodeURIComponent(token)}&ids=${ids}`, '_blank');
+}
+
+async function exportToolsPdf() {
+  const ids = Array.from(document.querySelectorAll('.tool-export-check:checked')).map((cb) => cb.value).join(',');
+  const token = api.getToken();
+  window.open(`/api/reports/export/tools-pdf?token=${encodeURIComponent(token)}&ids=${ids}`, '_blank');
 }
 
 function openMaterialModal(materialId = null) {

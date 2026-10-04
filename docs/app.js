@@ -975,7 +975,7 @@ function renderTools() {
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Código</th><th>Nombre</th><th>Marca</th><th>Cantidad</th><th>Ubicación</th><th>Estado</th><th>Responsable</th><th>Acciones</th></tr>
+            <tr><th>Código</th><th>Nombre</th><th>Marca</th><th>Serial</th><th>Cantidad</th><th>Ubicación</th><th>Estado</th><th>Responsable</th><th>Acciones</th></tr>
           </thead>
           <tbody>
             ${state.tools.map((tool) => `
@@ -983,6 +983,7 @@ function renderTools() {
                 <td>${escapeHtml(tool.code)}</td>
                 <td>${escapeHtml(tool.name)}</td>
                 <td>${escapeHtml(tool.brand || '-')}</td>
+                <td>${escapeHtml(tool.serial || '-')}</td>
                 <td>${tool.quantity}</td>
                 <td>${escapeHtml(tool.location)}</td>
                 <td>${toolStateBadge(tool.state)}</td>
@@ -993,7 +994,7 @@ function renderTools() {
                   ${state.user.role === 'ADMIN' ? `<button class="danger-btn" data-tool-delete="${tool.id}" type="button">Eliminar</button>` : ''}
                 </td>
               </tr>
-            `).join('') || '<tr><td colspan="8">No hay herramientas registradas</td></tr>'}
+            `).join('') || '<tr><td colspan="9">No hay herramientas registradas</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1090,6 +1091,36 @@ function renderReports() {
             <tr><td>Stock bajo</td><td>${state.lowStock.length}</td></tr>
             <tr><td>Movimientos</td><td>${state.movements.length}</td></tr>
             <tr><td>Inventario</td><td>${state.materials.length}</td></tr>
+            <tr><td>Herramientas</td><td>${state.tools.length}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="section-header">
+        <h3>Reporte de Herramientas</h3>
+        <div class="toolbar">
+          <button class="primary-btn" id="export-tools-excel-btn">EXPORTAR EXCEL</button>
+          <button class="secondary-btn" id="export-tools-pdf-btn">EXPORTAR PDF</button>
+        </div>
+      </div>
+      <p style="color:var(--muted); font-size:0.85rem;">Seleccione las herramientas que desea exportar:</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th><input type="checkbox" id="select-all-tools" checked /></th><th>Código</th><th>Nombre</th><th>Marca</th><th>Serial</th><th>Estado</th><th>Ubicación</th></tr>
+          </thead>
+          <tbody>
+            ${state.tools.map((t) => `
+              <tr>
+                <td><input type="checkbox" class="tool-export-check" value="${t.id}" checked /></td>
+                <td>${escapeHtml(t.code)}</td>
+                <td>${escapeHtml(t.name)}</td>
+                <td>${escapeHtml(t.brand || '-')}</td>
+                <td>${escapeHtml(t.serial || '-')}</td>
+                <td>${toolStateBadge(t.state)}</td>
+                <td>${escapeHtml(t.location)}</td>
+              </tr>`).join('') || '<tr><td colspan="7">No hay herramientas</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1270,6 +1301,11 @@ function bindCommonActions() {
   document.getElementById('new-movement-btn')?.addEventListener('click', (e) => openMovementModal(e.target.dataset.type));
   document.getElementById('export-excel-btn')?.addEventListener('click', exportExcel);
   document.getElementById('export-pdf-btn')?.addEventListener('click', exportPdf);
+  document.getElementById('select-all-tools')?.addEventListener('change', (e) => {
+    document.querySelectorAll('.tool-export-check').forEach((cb) => { cb.checked = e.target.checked; });
+  });
+  document.getElementById('export-tools-excel-btn')?.addEventListener('click', exportToolsExcel);
+  document.getElementById('export-tools-pdf-btn')?.addEventListener('click', exportToolsPdf);
   document.getElementById('institution-form')?.addEventListener('submit', handleInstitutionSubmit);
   document.getElementById('logo-input')?.addEventListener('change', readLogoFile);
   document.getElementById('brand-logo-input')?.addEventListener('change', readBrandLogoFile);
@@ -1438,6 +1474,56 @@ async function exportExcel() {
   } catch (error) {
     alert('Error al exportar Excel: ' + error.message);
   }
+}
+
+async function exportToolsExcel() {
+  try {
+    if (typeof ExcelJS === 'undefined') {
+      alert('No se pudo cargar la librería de Excel. Verifica tu conexión a internet.');
+      return;
+    }
+    const ids = new Set(Array.from(document.querySelectorAll('.tool-export-check:checked')).map((cb) => Number(cb.value)));
+    const items = cloudData.tools.filter((t) => ids.has(t.id));
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Herramientas');
+
+    worksheet.mergeCells('A1:J1');
+    worksheet.getCell('A1').value = state.institution.name;
+    worksheet.getCell('A1').font = { bold: true, size: 16 };
+    worksheet.getCell('A1').alignment = { horizontal: 'center' };
+    worksheet.mergeCells('A2:J2');
+    worksheet.getCell('A2').value = 'Reporte de Herramientas';
+    worksheet.getCell('A2').alignment = { horizontal: 'center' };
+
+    worksheet.columns = [
+      { header: 'Código', key: 'code', width: 16 },
+      { header: 'Nombre', key: 'name', width: 26 },
+      { header: 'Marca', key: 'brand', width: 16 },
+      { header: 'Serial', key: 'serial', width: 18 },
+      { header: 'Cantidad', key: 'quantity', width: 12 },
+      { header: 'Estado', key: 'state', width: 14 },
+      { header: 'Ubicación', key: 'location', width: 18 },
+      { header: 'Responsable', key: 'responsible', width: 24 },
+      { header: 'Fecha compra', key: 'acquisition_date', width: 16 },
+      { header: 'Costo', key: 'cost', width: 16 },
+    ];
+    items.forEach((t) => worksheet.addRow({ code: t.code, name: t.name, brand: t.brand, serial: t.serial, quantity: t.quantity, state: t.state, location: t.location, responsible: t.responsible, acquisition_date: t.acquisition_date, cost: t.cost }));
+    worksheet.getRow(3).font = { bold: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'Herramientas_San_Miguel.xlsx';
+    link.click();
+    URL.revokeObjectURL(link.href);
+  } catch (error) {
+    alert('Error al exportar Excel: ' + error.message);
+  }
+}
+
+async function exportToolsPdf() {
+  window.print();
 }
 
 async function exportPdf() {
