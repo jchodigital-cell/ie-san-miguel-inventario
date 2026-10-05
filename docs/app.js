@@ -1101,7 +1101,8 @@ function renderReports() {
         <h3>Reporte: Material de Ferretería</h3>
         <div class="toolbar">
           <button class="primary-btn" id="export-excel-btn">EXPORTAR EXCEL</button>
-          <button class="secondary-btn" id="export-pdf-btn">EXPORTAR PDF</button>
+          <button class="secondary-btn" id="print-material-btn">IMPRIMIR</button>
+          <button class="secondary-btn" id="download-material-pdf-btn">DESCARGAR PDF</button>
         </div>
       </div>
       <p style="color:var(--muted); font-size:0.85rem;">Seleccione los materiales que desea exportar:</p>
@@ -1131,7 +1132,8 @@ function renderReports() {
         <h3>Reporte: Herramientas</h3>
         <div class="toolbar">
           <button class="primary-btn" id="export-tools-excel-btn">EXPORTAR EXCEL</button>
-          <button class="secondary-btn" id="export-tools-pdf-btn">EXPORTAR PDF</button>
+          <button class="secondary-btn" id="print-tools-btn">IMPRIMIR</button>
+          <button class="secondary-btn" id="download-tools-pdf-btn">DESCARGAR PDF</button>
         </div>
       </div>
       <p style="color:var(--muted); font-size:0.85rem;">Seleccione las herramientas que desea exportar:</p>
@@ -1161,7 +1163,8 @@ function renderReports() {
         <h3>Reporte: Bajas</h3>
         <div class="toolbar">
           <button class="primary-btn" id="export-bajas-excel-btn">EXPORTAR EXCEL</button>
-          <button class="secondary-btn" id="export-bajas-pdf-btn">EXPORTAR PDF</button>
+          <button class="secondary-btn" id="print-bajas-btn">IMPRIMIR</button>
+          <button class="secondary-btn" id="download-bajas-pdf-btn">DESCARGAR PDF</button>
         </div>
       </div>
       <p style="color:var(--muted); font-size:0.85rem;">Materiales agotados y herramientas dadas de baja. Seleccione cuáles exportar:</p>
@@ -1376,7 +1379,8 @@ function bindCommonActions() {
   document.getElementById('new-user-btn')?.addEventListener('click', openUserModal);
   document.getElementById('new-movement-btn')?.addEventListener('click', (e) => openMovementModal(e.target.dataset.type));
   document.getElementById('export-excel-btn')?.addEventListener('click', exportExcel);
-  document.getElementById('export-pdf-btn')?.addEventListener('click', exportPdf);
+  document.getElementById('print-material-btn')?.addEventListener('click', printMaterialPdf);
+  document.getElementById('download-material-pdf-btn')?.addEventListener('click', downloadMaterialPdf);
   document.getElementById('select-all-materials')?.addEventListener('change', (e) => {
     document.querySelectorAll('.material-export-check').forEach((cb) => { cb.checked = e.target.checked; });
   });
@@ -1387,9 +1391,11 @@ function bindCommonActions() {
     document.querySelectorAll('.baja-export-check').forEach((cb) => { cb.checked = e.target.checked; });
   });
   document.getElementById('export-tools-excel-btn')?.addEventListener('click', exportToolsExcel);
-  document.getElementById('export-tools-pdf-btn')?.addEventListener('click', exportToolsPdf);
+  document.getElementById('print-tools-btn')?.addEventListener('click', printToolsPdf);
+  document.getElementById('download-tools-pdf-btn')?.addEventListener('click', downloadToolsPdf);
   document.getElementById('export-bajas-excel-btn')?.addEventListener('click', exportBajasExcel);
-  document.getElementById('export-bajas-pdf-btn')?.addEventListener('click', exportBajasPdf);
+  document.getElementById('print-bajas-btn')?.addEventListener('click', printBajasPdf);
+  document.getElementById('download-bajas-pdf-btn')?.addEventListener('click', downloadBajasPdf);
   document.getElementById('institution-form')?.addEventListener('submit', handleInstitutionSubmit);
   document.getElementById('logo-input')?.addEventListener('change', readLogoFile);
   document.getElementById('brand-logo-input')?.addEventListener('change', readBrandLogoFile);
@@ -1649,6 +1655,92 @@ function printModule(title, headers, rows) {
   setTimeout(() => { w.print(); }, 600);
 }
 
+// ===== Descarga de PDF (jsPDF) =====
+function generatePdfReport(title, headers, rows, fileName) {
+  if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {
+    alert('No se pudo cargar la librería PDF. Verifica tu conexión a internet.');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  let y = margin;
+
+  const inst = state.institution || {};
+  if (inst.logo_data) {
+    try {
+      doc.addImage(inst.logo_data, inst.logo_data.startsWith('data:image/png') ? 'PNG' : 'JPEG', margin, y, 50, 50);
+    } catch { /* ignorar */ }
+  }
+  doc.setFontSize(18);
+  doc.setTextColor(8, 55, 100);
+  doc.text(inst.name || 'Institución Educativa San Miguel', margin + 62, y + 20);
+  doc.setFontSize(11);
+  doc.setTextColor(80, 80, 80);
+  doc.text(title, margin + 62, y + 38);
+  y += 70;
+  doc.setFontSize(9);
+  doc.setTextColor(120, 120, 120);
+  doc.text(`Fecha: ${new Date().toLocaleString('es-CO')}`, margin, y);
+  y += 18;
+
+  // Encabezados
+  doc.setFontSize(9);
+  doc.setTextColor(8, 55, 100);
+  const colWidth = (pageWidth - margin * 2) / headers.length;
+  headers.forEach((h, i) => doc.text(String(h), margin + i * colWidth, y));
+  doc.setDrawColor(180);
+  doc.line(margin, y + 4, pageWidth - margin, y + 4);
+  y += 16;
+
+  doc.setTextColor(40, 40, 40);
+  rows.forEach((row) => {
+    if (y > pageHeight - margin - 20) {
+      doc.addPage();
+      y = margin;
+    }
+    row.forEach((cell, i) => {
+      const text = String(cell ?? '').slice(0, 24);
+      doc.text(text, margin + i * colWidth, y);
+    });
+    y += 14;
+  });
+
+  doc.setFontSize(8);
+  doc.setTextColor(140);
+  doc.text('Sistema de Inventario · IE San Miguel', margin, pageHeight - margin / 2);
+  doc.save(fileName);
+}
+
+async function downloadMaterialPdf() {
+  const ids = new Set(Array.from(document.querySelectorAll('.material-export-check:checked')).map((cb) => Number(cb.value)));
+  const items = cloudData.materials.map((m) => withCategory(m)).filter((m) => ids.size === 0 || ids.has(m.id));
+  const rows = items.map((m) => [m.code, m.name, m.category_name, m.unit, m.stock, m.status, m.location]);
+  generatePdfReport('Reporte: Material de Ferretería', ['Código', 'Nombre', 'Categoría', 'Unidad', 'Stock', 'Estado', 'Ubicación'], rows, 'Material_Ferreteria.pdf');
+}
+
+async function downloadToolsPdf() {
+  const ids = new Set(Array.from(document.querySelectorAll('.tool-export-check:checked')).map((cb) => Number(cb.value)));
+  const items = cloudData.tools.filter((t) => ids.size === 0 || ids.has(t.id));
+  const rows = items.map((t) => [t.code, t.name, t.brand || '-', t.serial || '-', t.quantity, t.state, t.location, t.responsible || '-']);
+  generatePdfReport('Reporte de Herramientas', ['Código', 'Nombre', 'Marca', 'Serial', 'Cantidad', 'Estado', 'Ubicación', 'Responsable'], rows, 'Herramientas.pdf');
+}
+
+async function downloadBajasPdf() {
+  const checked = Array.from(document.querySelectorAll('.baja-export-check:checked'));
+  const matIds = new Set(checked.filter((cb) => cb.dataset.kind === 'mat').map((cb) => Number(cb.value)));
+  const toolIds = new Set(checked.filter((cb) => cb.dataset.kind === 'tool').map((cb) => Number(cb.value)));
+  const mats = cloudData.materials.filter((m) => m.status === 'AGOTADO' && (matIds.size === 0 || matIds.has(m.id)));
+  const tools = cloudData.tools.filter((t) => t.state === 'MALA' && (toolIds.size === 0 || toolIds.has(t.id)));
+  const rows = [
+    ...mats.map((m) => ['MATERIAL', m.code, m.name, m.stock, m.status, m.location, '-']),
+    ...tools.map((t) => ['HERRAMIENTA', t.code, t.name, t.quantity, t.state, t.location, t.responsible || '-']),
+  ];
+  generatePdfReport('Reporte de Bajas', ['Tipo', 'Código', 'Nombre', 'Cantidad', 'Estado', 'Ubicación', 'Responsable'], rows, 'Bajas.pdf');
+}
+
 async function exportBajasExcel() {
   try {
     if (typeof ExcelJS === 'undefined') {
@@ -1692,7 +1784,7 @@ async function exportBajasExcel() {
   }
 }
 
-async function exportBajasPdf() {
+async function printBajasPdf() {
   const checked = Array.from(document.querySelectorAll('.baja-export-check:checked'));
   const matIds = new Set(checked.filter((cb) => cb.dataset.kind === 'mat').map((cb) => Number(cb.value)));
   const toolIds = new Set(checked.filter((cb) => cb.dataset.kind === 'tool').map((cb) => Number(cb.value)));
@@ -1705,14 +1797,14 @@ async function exportBajasPdf() {
   printModule('Reporte de Bajas', ['Tipo', 'Código', 'Nombre', 'Cantidad', 'Estado', 'Ubicación', 'Responsable'], rows);
 }
 
-async function exportToolsPdf() {
+async function printToolsPdf() {
   const ids = new Set(Array.from(document.querySelectorAll('.tool-export-check:checked')).map((cb) => Number(cb.value)));
   const items = cloudData.tools.filter((t) => ids.size === 0 || ids.has(t.id));
   const rows = items.map((t) => [t.code, t.name, t.brand || '-', t.serial || '-', t.quantity, t.state, t.location, t.responsible || '-']);
   printModule('Reporte de Herramientas', ['Código', 'Nombre', 'Marca', 'Serial', 'Cantidad', 'Estado', 'Ubicación', 'Responsable'], rows);
 }
 
-async function exportPdf() {
+async function printMaterialPdf() {
   const ids = new Set(Array.from(document.querySelectorAll('.material-export-check:checked')).map((cb) => Number(cb.value)));
   const items = cloudData.materials.map((m) => withCategory(m)).filter((m) => ids.size === 0 || ids.has(m.id));
   const rows = items.map((m) => [m.code, m.name, m.category_name, m.unit, m.stock, m.status, m.location]);
