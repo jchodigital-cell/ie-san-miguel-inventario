@@ -1073,14 +1073,12 @@ function renderKardex() {
 }
 
 function renderReports() {
+  const bajasMat = state.materials.filter((m) => m.status === 'AGOTADO');
+  const bajasTools = state.tools.filter((t) => t.state === 'MALA');
   return `
     <div class="panel">
       <div class="section-header">
         <h3>Reportes</h3>
-        <div class="toolbar">
-          <button class="primary-btn" id="export-excel-btn">EXPORTAR EXCEL</button>
-          <button class="secondary-btn" id="export-pdf-btn">EXPORTAR PDF</button>
-        </div>
       </div>
       <div class="table-wrap">
         <table>
@@ -1092,13 +1090,45 @@ function renderReports() {
             <tr><td>Movimientos</td><td>${state.movements.length}</td></tr>
             <tr><td>Inventario</td><td>${state.materials.length}</td></tr>
             <tr><td>Herramientas</td><td>${state.tools.length}</td></tr>
+            <tr><td>Bajas</td><td>${bajasMat.length + bajasTools.length}</td></tr>
           </tbody>
         </table>
       </div>
     </div>
+
     <div class="panel" style="margin-top:16px;">
       <div class="section-header">
-        <h3>Reporte de Herramientas</h3>
+        <h3>Reporte: Material de Ferretería</h3>
+        <div class="toolbar">
+          <button class="primary-btn" id="export-excel-btn">EXPORTAR EXCEL</button>
+          <button class="secondary-btn" id="export-pdf-btn">EXPORTAR PDF</button>
+        </div>
+      </div>
+      <p style="color:var(--muted); font-size:0.85rem;">Seleccione los materiales que desea exportar:</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th><input type="checkbox" id="select-all-materials" checked /></th><th>Código</th><th>Nombre</th><th>Categoría</th><th>Stock</th><th>Estado</th><th>Ubicación</th></tr>
+          </thead>
+          <tbody>
+            ${state.materials.map((m) => `
+              <tr>
+                <td><input type="checkbox" class="material-export-check" value="${m.id}" checked /></td>
+                <td>${escapeHtml(m.code)}</td>
+                <td>${escapeHtml(m.name)}</td>
+                <td>${escapeHtml(m.category_name)}</td>
+                <td>${m.stock}</td>
+                <td>${escapeHtml(m.status)}</td>
+                <td>${escapeHtml(m.location)}</td>
+              </tr>`).join('') || '<tr><td colspan="7">No hay materiales</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <div class="section-header">
+        <h3>Reporte: Herramientas</h3>
         <div class="toolbar">
           <button class="primary-btn" id="export-tools-excel-btn">EXPORTAR EXCEL</button>
           <button class="secondary-btn" id="export-tools-pdf-btn">EXPORTAR PDF</button>
@@ -1121,6 +1151,47 @@ function renderReports() {
                 <td>${toolStateBadge(t.state)}</td>
                 <td>${escapeHtml(t.location)}</td>
               </tr>`).join('') || '<tr><td colspan="7">No hay herramientas</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <div class="section-header">
+        <h3>Reporte: Bajas</h3>
+        <div class="toolbar">
+          <button class="primary-btn" id="export-bajas-excel-btn">EXPORTAR EXCEL</button>
+          <button class="secondary-btn" id="export-bajas-pdf-btn">EXPORTAR PDF</button>
+        </div>
+      </div>
+      <p style="color:var(--muted); font-size:0.85rem;">Materiales agotados y herramientas dadas de baja. Seleccione cuáles exportar:</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th><input type="checkbox" id="select-all-bajas" checked /></th><th>Tipo</th><th>Código</th><th>Nombre</th><th>Cantidad</th><th>Estado</th><th>Ubicación</th></tr>
+          </thead>
+          <tbody>
+            ${bajasMat.map((m) => `
+              <tr>
+                <td><input type="checkbox" class="baja-export-check" data-kind="mat" value="${m.id}" checked /></td>
+                <td>MATERIAL</td>
+                <td>${escapeHtml(m.code)}</td>
+                <td>${escapeHtml(m.name)}</td>
+                <td>${m.stock}</td>
+                <td>${escapeHtml(m.status)}</td>
+                <td>${escapeHtml(m.location)}</td>
+              </tr>`).join('')}
+            ${bajasTools.map((t) => `
+              <tr>
+                <td><input type="checkbox" class="baja-export-check" data-kind="tool" value="${t.id}" checked /></td>
+                <td>HERRAMIENTA</td>
+                <td>${escapeHtml(t.code)}</td>
+                <td>${escapeHtml(t.name)}</td>
+                <td>${t.quantity}</td>
+                <td>${toolStateBadge(t.state)}</td>
+                <td>${escapeHtml(t.location)}</td>
+              </tr>`).join('')}
+            ${bajasMat.length + bajasTools.length === 0 ? '<tr><td colspan="7">No hay bajas registradas</td></tr>' : ''}
           </tbody>
         </table>
       </div>
@@ -1306,11 +1377,19 @@ function bindCommonActions() {
   document.getElementById('new-movement-btn')?.addEventListener('click', (e) => openMovementModal(e.target.dataset.type));
   document.getElementById('export-excel-btn')?.addEventListener('click', exportExcel);
   document.getElementById('export-pdf-btn')?.addEventListener('click', exportPdf);
+  document.getElementById('select-all-materials')?.addEventListener('change', (e) => {
+    document.querySelectorAll('.material-export-check').forEach((cb) => { cb.checked = e.target.checked; });
+  });
   document.getElementById('select-all-tools')?.addEventListener('change', (e) => {
     document.querySelectorAll('.tool-export-check').forEach((cb) => { cb.checked = e.target.checked; });
   });
+  document.getElementById('select-all-bajas')?.addEventListener('change', (e) => {
+    document.querySelectorAll('.baja-export-check').forEach((cb) => { cb.checked = e.target.checked; });
+  });
   document.getElementById('export-tools-excel-btn')?.addEventListener('click', exportToolsExcel);
   document.getElementById('export-tools-pdf-btn')?.addEventListener('click', exportToolsPdf);
+  document.getElementById('export-bajas-excel-btn')?.addEventListener('click', exportBajasExcel);
+  document.getElementById('export-bajas-pdf-btn')?.addEventListener('click', exportBajasPdf);
   document.getElementById('institution-form')?.addEventListener('submit', handleInstitutionSubmit);
   document.getElementById('logo-input')?.addEventListener('change', readLogoFile);
   document.getElementById('brand-logo-input')?.addEventListener('change', readBrandLogoFile);
@@ -1441,7 +1520,8 @@ async function exportExcel() {
     worksheet.getCell('A3').value = `Generado: ${new Date().toLocaleString('es-ES')}`;
     worksheet.getCell('A3').alignment = { horizontal: 'right' };
 
-    const rows = cloudData.materials.map((m) => withCategory(m)).map((m) => ({
+    const selectedMatIds = new Set(Array.from(document.querySelectorAll('.material-export-check:checked')).map((cb) => Number(cb.value)));
+    const rows = cloudData.materials.filter((m) => selectedMatIds.size === 0 || selectedMatIds.has(m.id)).map((m) => withCategory(m)).map((m) => ({
       code: m.code,
       material: m.name,
       category: m.category_name,
@@ -1525,6 +1605,53 @@ async function exportToolsExcel() {
   } catch (error) {
     alert('Error al exportar Excel: ' + error.message);
   }
+}
+
+async function exportBajasExcel() {
+  try {
+    if (typeof ExcelJS === 'undefined') {
+      alert('No se pudo cargar la librería de Excel. Verifica tu conexión a internet.');
+      return;
+    }
+    const checked = Array.from(document.querySelectorAll('.baja-export-check:checked'));
+    const matIds = new Set(checked.filter((cb) => cb.dataset.kind === 'mat').map((cb) => Number(cb.value)));
+    const toolIds = new Set(checked.filter((cb) => cb.dataset.kind === 'tool').map((cb) => Number(cb.value)));
+    const mats = cloudData.materials.filter((m) => m.status === 'AGOTADO' && (matIds.size === 0 || matIds.has(m.id)));
+    const tools = cloudData.tools.filter((t) => t.state === 'MALA' && (toolIds.size === 0 || toolIds.has(t.id)));
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Bajas');
+    worksheet.mergeCells('A1:G1');
+    worksheet.getCell('A1').value = state.institution.name;
+    worksheet.getCell('A1').font = { bold: true, size: 16 };
+    worksheet.getCell('A1').alignment = { horizontal: 'center' };
+    worksheet.columns = [
+      { header: 'Tipo', key: 'tipo', width: 16 },
+      { header: 'Código', key: 'code', width: 16 },
+      { header: 'Nombre', key: 'name', width: 30 },
+      { header: 'Cantidad', key: 'quantity', width: 12 },
+      { header: 'Estado', key: 'state', width: 14 },
+      { header: 'Ubicación', key: 'location', width: 18 },
+      { header: 'Responsable', key: 'responsible', width: 24 },
+    ];
+    mats.forEach((m) => worksheet.addRow({ tipo: 'MATERIAL', code: m.code, name: m.name, quantity: m.stock, state: m.status, location: m.location, responsible: '-' }));
+    tools.forEach((t) => worksheet.addRow({ tipo: 'HERRAMIENTA', code: t.code, name: t.name, quantity: t.quantity, state: t.state, location: t.location, responsible: t.responsible || '-' }));
+    worksheet.getRow(2).font = { bold: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'Bajas_San_Miguel.xlsx';
+    link.click();
+    URL.revokeObjectURL(link.href);
+  } catch (error) {
+    alert('Error al exportar Excel de bajas: ' + error.message);
+  }
+}
+
+async function exportBajasPdf() {
+  window.print();
 }
 
 async function exportToolsPdf() {

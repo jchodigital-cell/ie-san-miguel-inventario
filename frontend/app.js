@@ -606,14 +606,12 @@ function renderKardex() {
 }
 
 function renderReports() {
+  const bajasMat = state.materials.filter((m) => m.status === 'AGOTADO');
+  const bajasTools = state.tools.filter((t) => t.state === 'MALA');
   return `
     <div class="panel">
       <div class="section-header">
         <h3>Reportes</h3>
-        <div class="toolbar">
-          <button class="primary-btn" id="export-excel-btn">EXPORTAR EXCEL</button>
-          <button class="secondary-btn" id="export-pdf-btn">EXPORTAR PDF</button>
-        </div>
       </div>
       <div class="table-wrap">
         <table>
@@ -625,13 +623,47 @@ function renderReports() {
             <tr><td>Movimientos</td><td>${state.movements.length}</td></tr>
             <tr><td>Inventario</td><td>${state.materials.length}</td></tr>
             <tr><td>Herramientas</td><td>${state.tools.length}</td></tr>
+            <tr><td>Bajas</td><td>${bajasMat.length + bajasTools.length}</td></tr>
           </tbody>
         </table>
       </div>
     </div>
+
+    <!-- MÓDULO MATERIAL FERRETERÍA -->
     <div class="panel" style="margin-top:16px;">
       <div class="section-header">
-        <h3>Reporte de Herramientas</h3>
+        <h3>Reporte: Material de Ferretería</h3>
+        <div class="toolbar">
+          <button class="primary-btn" id="export-excel-btn">EXPORTAR EXCEL</button>
+          <button class="secondary-btn" id="export-pdf-btn">EXPORTAR PDF</button>
+        </div>
+      </div>
+      <p style="color:var(--muted); font-size:0.85rem;">Seleccione los materiales que desea exportar:</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th><input type="checkbox" id="select-all-materials" checked /></th><th>Código</th><th>Nombre</th><th>Categoría</th><th>Stock</th><th>Estado</th><th>Ubicación</th></tr>
+          </thead>
+          <tbody>
+            ${state.materials.map((m) => `
+              <tr>
+                <td><input type="checkbox" class="material-export-check" value="${m.id}" checked /></td>
+                <td>${escapeHtml(m.code)}</td>
+                <td>${escapeHtml(m.name)}</td>
+                <td>${escapeHtml(m.category_name)}</td>
+                <td>${m.stock}</td>
+                <td>${escapeHtml(m.status)}</td>
+                <td>${escapeHtml(m.location)}</td>
+              </tr>`).join('') || '<tr><td colspan="7">No hay materiales</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- MÓDULO HERRAMIENTAS -->
+    <div class="panel" style="margin-top:16px;">
+      <div class="section-header">
+        <h3>Reporte: Herramientas</h3>
         <div class="toolbar">
           <button class="primary-btn" id="export-tools-excel-btn">EXPORTAR EXCEL</button>
           <button class="secondary-btn" id="export-tools-pdf-btn">EXPORTAR PDF</button>
@@ -654,6 +686,48 @@ function renderReports() {
                 <td>${toolStateBadge(t.state)}</td>
                 <td>${escapeHtml(t.location)}</td>
               </tr>`).join('') || '<tr><td colspan="7">No hay herramientas</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- MÓDULO BAJAS -->
+    <div class="panel" style="margin-top:16px;">
+      <div class="section-header">
+        <h3>Reporte: Bajas</h3>
+        <div class="toolbar">
+          <button class="primary-btn" id="export-bajas-excel-btn">EXPORTAR EXCEL</button>
+          <button class="secondary-btn" id="export-bajas-pdf-btn">EXPORTAR PDF</button>
+        </div>
+      </div>
+      <p style="color:var(--muted); font-size:0.85rem;">Materiales agotados y herramientas dadas de baja. Seleccione cuáles exportar:</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th><input type="checkbox" id="select-all-bajas" checked /></th><th>Tipo</th><th>Código</th><th>Nombre</th><th>Cantidad</th><th>Estado</th><th>Ubicación</th></tr>
+          </thead>
+          <tbody>
+            ${bajasMat.map((m) => `
+              <tr>
+                <td><input type="checkbox" class="baja-export-check" data-kind="mat" value="${m.id}" checked /></td>
+                <td>MATERIAL</td>
+                <td>${escapeHtml(m.code)}</td>
+                <td>${escapeHtml(m.name)}</td>
+                <td>${m.stock}</td>
+                <td>${escapeHtml(m.status)}</td>
+                <td>${escapeHtml(m.location)}</td>
+              </tr>`).join('')}
+            ${bajasTools.map((t) => `
+              <tr>
+                <td><input type="checkbox" class="baja-export-check" data-kind="tool" value="${t.id}" checked /></td>
+                <td>HERRAMIENTA</td>
+                <td>${escapeHtml(t.code)}</td>
+                <td>${escapeHtml(t.name)}</td>
+                <td>${t.quantity}</td>
+                <td>${toolStateBadge(t.state)}</td>
+                <td>${escapeHtml(t.location)}</td>
+              </tr>`).join('')}
+            ${bajasMat.length + bajasTools.length === 0 ? '<tr><td colspan="7">No hay bajas registradas</td></tr>' : ''}
           </tbody>
         </table>
       </div>
@@ -834,11 +908,19 @@ function bindCommonActions() {
   document.getElementById('new-movement-btn')?.addEventListener('click', (e) => openMovementModal(e.target.dataset.type));
   document.getElementById('export-excel-btn')?.addEventListener('click', exportExcel);
   document.getElementById('export-pdf-btn')?.addEventListener('click', exportPdf);
+  document.getElementById('select-all-materials')?.addEventListener('change', (e) => {
+    document.querySelectorAll('.material-export-check').forEach((cb) => { cb.checked = e.target.checked; });
+  });
   document.getElementById('select-all-tools')?.addEventListener('change', (e) => {
     document.querySelectorAll('.tool-export-check').forEach((cb) => { cb.checked = e.target.checked; });
   });
+  document.getElementById('select-all-bajas')?.addEventListener('change', (e) => {
+    document.querySelectorAll('.baja-export-check').forEach((cb) => { cb.checked = e.target.checked; });
+  });
   document.getElementById('export-tools-excel-btn')?.addEventListener('click', exportToolsExcel);
   document.getElementById('export-tools-pdf-btn')?.addEventListener('click', exportToolsPdf);
+  document.getElementById('export-bajas-excel-btn')?.addEventListener('click', exportBajasExcel);
+  document.getElementById('export-bajas-pdf-btn')?.addEventListener('click', exportBajasPdf);
   document.getElementById('institution-form')?.addEventListener('submit', handleInstitutionSubmit);
   document.getElementById('logo-input')?.addEventListener('change', readLogoFile);
   document.getElementById('brand-logo-input')?.addEventListener('change', readBrandLogoFile);
@@ -947,13 +1029,31 @@ async function handleInstitutionSubmit(event) {
 }
 
 async function exportExcel() {
+  const ids = Array.from(document.querySelectorAll('.material-export-check:checked')).map((cb) => cb.value).join(',');
   const token = api.getToken();
-  window.open(`/api/reports/export/excel?token=${encodeURIComponent(token)}`, '_blank');
+  window.open(`/api/reports/export/excel?token=${encodeURIComponent(token)}&ids=${ids}`, '_blank');
 }
 
 async function exportPdf() {
+  const ids = Array.from(document.querySelectorAll('.material-export-check:checked')).map((cb) => cb.value).join(',');
   const token = api.getToken();
-  window.open(`/api/reports/export/pdf?token=${encodeURIComponent(token)}`, '_blank');
+  window.open(`/api/reports/export/pdf?token=${encodeURIComponent(token)}&ids=${ids}`, '_blank');
+}
+
+async function exportBajasExcel() {
+  const checked = Array.from(document.querySelectorAll('.baja-export-check:checked'));
+  const matIds = checked.filter((cb) => cb.dataset.kind === 'mat').map((cb) => cb.value).join(',');
+  const toolIds = checked.filter((cb) => cb.dataset.kind === 'tool').map((cb) => cb.value).join(',');
+  const token = api.getToken();
+  window.open(`/api/reports/export/bajas-excel?token=${encodeURIComponent(token)}&matIds=${matIds}&toolIds=${toolIds}`, '_blank');
+}
+
+async function exportBajasPdf() {
+  const checked = Array.from(document.querySelectorAll('.baja-export-check:checked'));
+  const matIds = checked.filter((cb) => cb.dataset.kind === 'mat').map((cb) => cb.value).join(',');
+  const toolIds = checked.filter((cb) => cb.dataset.kind === 'tool').map((cb) => cb.value).join(',');
+  const token = api.getToken();
+  window.open(`/api/reports/export/bajas-pdf?token=${encodeURIComponent(token)}&matIds=${matIds}&toolIds=${toolIds}`, '_blank');
 }
 
 async function exportToolsExcel() {

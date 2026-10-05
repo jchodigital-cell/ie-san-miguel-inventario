@@ -1060,13 +1060,16 @@ app.get('/api/reports/export/excel', authMiddleware, (req, res) => {
     worksheet.getCell('A3').alignment = { horizontal: 'right' };
 
     const rows = db.prepare(`
-      SELECT m.code, m.name AS material, c.name AS category, m.unit, m.stock, m.stock_minimo, m.status, m.location,
+      SELECT m.id, m.code, m.name AS material, c.name AS category, m.unit, m.stock, m.stock_minimo, m.status, m.location,
         COALESCE((SELECT SUM(quantity) FROM movements WHERE material_id = m.id AND type = 'ENTRADA'), 0) AS total_entradas,
         COALESCE((SELECT SUM(quantity) FROM movements WHERE material_id = m.id AND type = 'SALIDA'), 0) AS total_salidas
       FROM materials m
       JOIN categories c ON c.id = m.category_id
       ORDER BY m.name ASC
     `).all();
+
+    const { ids } = req.query;
+    const filtered = ids ? rows.filter((r) => String(ids).split(',').map(Number).includes(r.id)) : rows;
 
     worksheet.columns = [
       { header: 'Código', key: 'code', width: 16 },
@@ -1081,7 +1084,7 @@ app.get('/api/reports/export/excel', authMiddleware, (req, res) => {
       { header: 'Total salidas', key: 'total_salidas', width: 16 },
     ];
 
-    worksheet.addRows(rows);
+    worksheet.addRows(filtered);
     worksheet.getRow(5).font = { bold: true };
     worksheet.views = [{ state: 'frozen', ySplit: 4 }];
 
@@ -1221,6 +1224,124 @@ app.get('/api/reports/export/tools-pdf', authMiddleware, (req, res) => {
   }
 });
 
+app.get('/api/reports/bajas', authMiddleware, (req, res) => {
+  try {
+    const agotados = db.prepare(`
+      SELECT m.id, 'MATERIAL' AS tipo, m.code, m.name, m.unit, m.stock, m.location, m.status, c.name AS category_name
+      FROM materials m
+      JOIN categories c ON c.id = m.category_id
+      WHERE m.status = 'AGOTADO'
+      ORDER BY m.name ASC
+    `).all();
+    const malas = db.prepare(`
+      SELECT t.id, 'HERRAMIENTA' AS tipo, t.code, t.name, t.brand, t.quantity, t.location, t.state, t.responsible
+      FROM tools t
+      WHERE t.state = 'MALA'
+      ORDER BY t.name ASC
+    `).all();
+    return res.json(successResponse({ materials: agotados, tools: malas }));
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al consultar bajas'));
+  }
+});
+
+function getBajasItems(req) {
+  const { matIds, toolIds } = req.query;
+  const matSet = matIds ? String(matIds).split(',').map(Number) : null;
+  const toolSet = toolIds ? String(toolIds).split(',').map(Number) : null;
+
+  let materials = db.prepare('SELECT * FROM materials WHERE status = ?').all('AGOTADO');
+  let tools = db.prepare('SELECT * FROM tools WHERE state = ?').all('MALA');
+  if (matSet) materials = materials.filter((m) => matSet.includes(m.id));
+  if (toolSet) tools = tools.filter((t) => toolSet.includes(t.id));
+  return { materials, tools };
+}
+
+app.get('/api/reports/export/bajas-excel', authMiddleware, (req, res) => {
+  try {
+    const institution = getInstitution();
+    const { materials, tools } = getBajasItems(req);
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Bajas');
+
+    worksheet.mergeCells('A1:I1');
+    worksheet.getCell('A1').value = institution.name;
+    worksheet.getCell('A1').font = { bold: true, size: 16 };
+    worksheet.getCell('A1').alignment = { horizontal: 'center' };
+    worksheet.mergeCells('A2:I2');
+    worksheet.getCell('A2').value = 'Reporte de Bajas (Materiales agotados y herramientas dadas de baja)';
+    worksheet.getCell('A2').alignment = { horizontal: 'center' };
+
+    worksheet.columns = [
+      { header: 'Tipo', key: 'tipo', width: 16 },
+      { header: 'Código', key: 'code', width: 16 },
+      { header: 'Nombre', key: 'name', width: 30 },
+      { header: 'Cantidad', key: 'quantity', width: 12 },
+      { header: 'Estado', key: 'state', width: 14 },
+      { header: 'Ubicación', key: 'location', width: 18 },
+      { header: 'Responsable', key: 'responsible', width: 24 },
+    ];
+
+    materials.forEach((m) => worksheet.addRow({ tipo: 'MATERIAL', code: m.code, name: m.name, quantity: m.stock, state: m.status, location: m.location, responsible: '-' }));
+    tools.forEach((t) => worksheet.addRow({ tipo: 'HERRAMIENTA', code: t.code, name: t.name, quantity: t.quantity, state: t.state, location: t.location, responsible: t.responsible || '-' }));
+    worksheet.getRow(3).font = { bold: true };
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="Bajas_San_Miguel.xlsx"');
+    workbook.xlsx.write(res).then(() => res.end());
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al exportar Excel de bajas'));
+  }
+});
+
+app.get('/api/reports/export/bajas-pdf', authMiddleware, (req, res) => {
+  try {
+    const institution = getInstitution();
+    const { materials, tools } = getBajasItems(req);
+    const doc = new PDFDocument({ margin: 30, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="Bajas_San_Miguel.pdf"');
+    doc.pipe(res);
+
+    if (institution.logo_data) {
+      try {
+        const buffer = Buffer.from(institution.logo_data.split(',')[1], 'base64');
+        doc.image(buffer, 30, 30, { width: 60, height: 60 });
+      } catch (error) { /* ignorar */ }
+    }
+
+    doc.fontSize(18).text(institution.name, 110, 35);
+    doc.fontSize(10).text('Reporte de Bajas', 110, 60);
+    doc.fontSize(9).text(`Generado: ${new Date().toLocaleString('es-ES')}`, 30, 110);
+
+    const tableTop = 150;
+    const columnPositions = [30, 120, 185, 300, 360, 420, 490];
+    const headers = ['Tipo', 'Código', 'Nombre', 'Cantidad', 'Estado', 'Ubicación', 'Responsable'];
+
+    doc.fontSize(9).font('Helvetica-Bold');
+    headers.forEach((header, index) => doc.text(header, columnPositions[index], tableTop, { width: 65, align: 'left' }));
+    doc.moveTo(30, tableTop + 12).lineTo(560, tableTop + 12).stroke();
+    doc.font('Helvetica');
+
+    const items = [
+      ...materials.map((m) => ({ tipo: 'MATERIAL', code: m.code, name: m.name, quantity: m.stock, state: m.status, location: m.location, responsible: '-' })),
+      ...tools.map((t) => ({ tipo: 'HERRAMIENTA', code: t.code, name: t.name, quantity: t.quantity, state: t.state, location: t.location, responsible: t.responsible || '-' })),
+    ];
+    items.forEach((row, index) => {
+      const y = tableTop + 25 + index * 18;
+      if (y > 720) doc.addPage();
+      const values = [row.tipo, row.code, row.name, String(row.quantity), row.state, row.location, row.responsible];
+      values.forEach((value, idx) => doc.text(String(value || ''), columnPositions[idx], y, { width: idx === 2 ? 110 : 65, ellipsis: true }));
+    });
+
+    doc.text('Sistema de Inventario', 30, 760);
+    doc.text('IE San Miguel', 430, 760);
+    doc.end();
+  } catch (error) {
+    return res.status(500).json(errorResponse('Error al exportar PDF de bajas'));
+  }
+});
+
 app.get('/api/reports/export/pdf', authMiddleware, (req, res) => {
   try {
     const institution = getInstitution();
@@ -1245,12 +1366,14 @@ app.get('/api/reports/export/pdf', authMiddleware, (req, res) => {
     doc.fontSize(9).text(`Fecha de generación: ${new Date().toLocaleString('es-ES')}`, 30, 110);
 
     const rows = db.prepare(`
-      SELECT m.code, m.name AS material, m.unit, m.stock, m.stock_minimo, m.status, m.location,
+      SELECT m.id, m.code, m.name AS material, m.unit, m.stock, m.stock_minimo, m.status, m.location,
         COALESCE((SELECT SUM(quantity) FROM movements WHERE material_id = m.id AND type = 'ENTRADA'), 0) AS entradas,
         COALESCE((SELECT SUM(quantity) FROM movements WHERE material_id = m.id AND type = 'SALIDA'), 0) AS salidas
       FROM materials m
       ORDER BY m.name ASC
     `).all();
+    const { ids } = req.query;
+    const items = ids ? rows.filter((r) => String(ids).split(',').map(Number).includes(r.id)) : rows;
 
     const tableTop = 150;
     const columnPositions = [30, 95, 175, 230, 275, 325, 385, 440, 490];
@@ -1264,7 +1387,7 @@ app.get('/api/reports/export/pdf', authMiddleware, (req, res) => {
     doc.moveTo(30, tableTop + 12).lineTo(560, tableTop + 12).stroke();
     doc.font('Helvetica');
 
-    rows.forEach((row, index) => {
+    items.forEach((row, index) => {
       const y = tableTop + 25 + index * 18;
       if (y > 720) {
         doc.addPage();
