@@ -1607,6 +1607,48 @@ async function exportToolsExcel() {
   }
 }
 
+function buildPrintableHtml(title, headers, rows) {
+  const inst = state.institution || {};
+  return `
+  <!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #222; }
+    .header { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+    .header img { width: 64px; height: 64px; object-fit: contain; }
+    h1 { color: #083764; font-size: 20px; margin: 0; }
+    h2 { color: #444; font-size: 13px; margin: 2px 0 0; }
+    p.fecha { font-size: 11px; color: #666; margin: 8px 0 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 11px; }
+    th, td { border: 1px solid #cfd6e4; padding: 6px 8px; text-align: left; }
+    th { background: #eef3fb; }
+    footer { margin-top: 22px; font-size: 10px; color: #777; display: flex; justify-content: space-between; }
+  </style></head><body>
+    <div class="header">
+      ${inst.logo_data ? `<img src="${inst.logo_data}" />` : ''}
+      <div>
+        <h1>${inst.name || 'Institución Educativa San Miguel'}</h1>
+        <h2>${title}</h2>
+      </div>
+    </div>
+    <p class="fecha">Fecha: ${new Date().toLocaleString('es-CO')}</p>
+    <table>
+      <thead><tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr></thead>
+      <tbody>${rows.length ? rows.map((r) => `<tr>${r.map((c) => `<td>${c ?? ''}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${headers.length}">Sin registros</td></tr>`}</tbody>
+    </table>
+    <footer><span>Sistema de Inventario</span><span>Institución Educativa San Miguel</span></footer>
+  </body></html>`;
+}
+
+function printModule(title, headers, rows) {
+  const w = window.open('', '_blank');
+  if (!w) { alert('Permite las ventanas emergentes para exportar PDF.'); return; }
+  w.document.open();
+  w.document.write(buildPrintableHtml(title, headers, rows));
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); }, 600);
+}
+
 async function exportBajasExcel() {
   try {
     if (typeof ExcelJS === 'undefined') {
@@ -1651,15 +1693,30 @@ async function exportBajasExcel() {
 }
 
 async function exportBajasPdf() {
-  window.print();
+  const checked = Array.from(document.querySelectorAll('.baja-export-check:checked'));
+  const matIds = new Set(checked.filter((cb) => cb.dataset.kind === 'mat').map((cb) => Number(cb.value)));
+  const toolIds = new Set(checked.filter((cb) => cb.dataset.kind === 'tool').map((cb) => Number(cb.value)));
+  const mats = cloudData.materials.filter((m) => m.status === 'AGOTADO' && (matIds.size === 0 || matIds.has(m.id)));
+  const tools = cloudData.tools.filter((t) => t.state === 'MALA' && (toolIds.size === 0 || toolIds.has(t.id)));
+  const rows = [
+    ...mats.map((m) => ['MATERIAL', m.code, m.name, m.stock, m.status, m.location, '-']),
+    ...tools.map((t) => ['HERRAMIENTA', t.code, t.name, t.quantity, t.state, t.location, t.responsible || '-']),
+  ];
+  printModule('Reporte de Bajas', ['Tipo', 'Código', 'Nombre', 'Cantidad', 'Estado', 'Ubicación', 'Responsable'], rows);
 }
 
 async function exportToolsPdf() {
-  window.print();
+  const ids = new Set(Array.from(document.querySelectorAll('.tool-export-check:checked')).map((cb) => Number(cb.value)));
+  const items = cloudData.tools.filter((t) => ids.size === 0 || ids.has(t.id));
+  const rows = items.map((t) => [t.code, t.name, t.brand || '-', t.serial || '-', t.quantity, t.state, t.location, t.responsible || '-']);
+  printModule('Reporte de Herramientas', ['Código', 'Nombre', 'Marca', 'Serial', 'Cantidad', 'Estado', 'Ubicación', 'Responsable'], rows);
 }
 
 async function exportPdf() {
-  window.print();
+  const ids = new Set(Array.from(document.querySelectorAll('.material-export-check:checked')).map((cb) => Number(cb.value)));
+  const items = cloudData.materials.map((m) => withCategory(m)).filter((m) => ids.size === 0 || ids.has(m.id));
+  const rows = items.map((m) => [m.code, m.name, m.category_name, m.unit, m.stock, m.status, m.location]);
+  printModule('Reporte: Material de Ferretería', ['Código', 'Nombre', 'Categoría', 'Unidad', 'Stock', 'Estado', 'Ubicación'], rows);
 }
 
 function openMaterialModal(materialId = null) {
