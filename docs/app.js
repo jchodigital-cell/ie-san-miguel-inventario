@@ -1687,7 +1687,7 @@ function generatePdfReport(title, headers, rows, fileName) {
   y += 18;
 
   // Encabezados
-  doc.setFontSize(9);
+  doc.setFontSize(8);
   doc.setTextColor(8, 55, 100);
   const colWidth = (pageWidth - margin * 2) / headers.length;
   headers.forEach((h, i) => doc.text(String(h), margin + i * colWidth, y));
@@ -1696,14 +1696,16 @@ function generatePdfReport(title, headers, rows, fileName) {
   y += 16;
 
   doc.setTextColor(40, 40, 40);
+  const maxChars = Math.max(10, Math.floor((colWidth - 6) / 4.4));
   rows.forEach((row) => {
     if (y > pageHeight - margin - 20) {
       doc.addPage();
       y = margin;
     }
     row.forEach((cell, i) => {
-      const text = String(cell ?? '').slice(0, 24);
-      doc.text(text, margin + i * colWidth, y);
+      let text = String(cell ?? '');
+      if (text.length > maxChars) text = text.slice(0, maxChars - 1) + '…';
+      doc.text(text, margin + i * colWidth, y, { maxWidth: colWidth - 6 });
     });
     y += 14;
   });
