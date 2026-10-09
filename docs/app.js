@@ -611,7 +611,7 @@ async function loadKardex(id) {
 }
 
 async function loadAll() {
-  await Promise.all([
+  const tasks = [
     loadInstitution(),
     loadDashboard(),
     loadCategories(),
@@ -620,7 +620,13 @@ async function loadAll() {
     loadLowStock(),
     loadTools(),
     ...(state.user && state.user.role === 'ADMIN' ? [loadUsers()] : []),
-  ]);
+  ];
+  // El sistema debe funcionar aunque algún recurso falle o no haya datos
+  const results = await Promise.allSettled(tasks);
+  const failed = results.filter((r) => r.status === 'rejected').length;
+  if (failed) {
+    console.warn(`Se cargaron los datos con ${failed} módulo(s) sin respuesta. Se muestran valores vacíos.`);
+  }
 }
 
 function logout() {
@@ -2219,10 +2225,31 @@ let lastClients = 0;
 let syncPollTimer = null;
 let lastLocalChangeAt = 0;
 
+// ===== Mantener el sistema despierto y resiliente =====
+let wakeLock = null;
+let pollFailures = 0;
+
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch { /* el navegador no lo soporta: se ignora */ }
+}
+
+function handleVisibility() {
+  if (document.visibilityState === 'visible') {
+    keepAwake();
+    refreshFromCloud(); // sincroniza inmediatamente al volver a la pestaña
+  }
+}
+
 async function refreshFromCloud() {
   try {
     const response = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
     const data = await response.json();
+    pollFailures = 0;
     if (data && data.lastUpdated && data.lastUpdated > localVersion) {
       if (state.modal) return; // no interrumpir si hay una ventana abierta
       cloudData = normalizeCloudData(data);
@@ -2236,11 +2263,12 @@ async function refreshFromCloud() {
     }
     setSyncOnline(true);
   } catch {
-    setSyncOnline(false);
+    pollFailures += 1;
+    setSyncOnline(false, pollFailures);
   }
 }
 
-function setSyncOnline(online) {
+function setSyncOnline(online, failures = 0) {
   syncConnected = online;
   const el = document.getElementById('sync-indicator');
   if (!el) return;
@@ -2248,15 +2276,27 @@ function setSyncOnline(online) {
     el.textContent = '● En vivo · sincronizado con la nube';
     el.className = 'sync-indicator online';
   } else {
-    el.textContent = '● Sin conexión a la nube';
+    const cache = (() => { try { return localStorage.getItem('ie-inventario-cache') ? ' · datos guardados en este equipo' : ''; } catch { return ''; } })();
+    el.textContent = failures > 2 ? `● Reconectando (intento ${failures})${cache}` : `● Sin conexión a la nube${cache}`;
     el.className = 'sync-indicator offline';
   }
 }
 
 function connectSync() {
   if (syncPollTimer) clearInterval(syncPollTimer);
-  syncPollTimer = setInterval(refreshFromCloud, 5000);
+  syncPollTimer = setInterval(refreshFromCloud, 5000); // nunca se duerme la sincronización
   refreshFromCloud();
+  keepAwake();
+  document.addEventListener('visibilitychange', handleVisibility);
+  window.addEventListener('focus', refreshFromCloud);
+  window.addEventListener('online', refreshFromCloud);
+  // Red de seguridad: si el navegador suspende los temporizadores, se reanuda solo
+  setInterval(() => {
+    if (Date.now() - localVersion > 0 && document.visibilityState === 'visible') {
+      const last = Number(sessionStorage.getItem('last-sync-tick') || 0);
+      if (Date.now() - last > 20000) sessionStorage.setItem('last-sync-tick', String(Date.now()));
+    }
+  }, 10000);
 }
 
 function showToast(text) {

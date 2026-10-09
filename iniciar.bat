@@ -11,4 +11,10 @@ if not exist data (
   node backend\src\seed.js
 )
 start "" http://localhost:3000
+echo Sistema iniciado. Si se cierra la ventana, el servidor se reiniciara solo.
+:loop
 node backend\src\server.js
+echo.
+echo El servidor se detuvo. Reiniciando en 3 segundos... (Ctrl+C para salir)
+timeout /t 3 /nobreak >nul
+goto loop

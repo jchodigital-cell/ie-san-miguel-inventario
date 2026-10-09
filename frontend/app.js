@@ -144,7 +144,7 @@ async function loadKardex(id) {
 }
 
 async function loadAll() {
-  await Promise.all([
+  const tasks = [
     loadInstitution(),
     loadDashboard(),
     loadCategories(),
@@ -153,7 +153,13 @@ async function loadAll() {
     loadLowStock(),
     loadTools(),
     ...(state.user && state.user.role === 'ADMIN' ? [loadUsers()] : []),
-  ]);
+  ];
+  // El sistema debe funcionar aunque algún recurso falle o no haya datos
+  const results = await Promise.allSettled(tasks);
+  const failed = results.filter((r) => r.status === 'rejected').length;
+  if (failed) {
+    console.warn(`Se cargaron los datos con ${failed} módulo(s) sin respuesta. Se muestran valores vacíos.`);
+  }
 }
 
 function logout() {
@@ -1546,7 +1552,7 @@ let lastClients = 0;
 function connectSync() {
   if (typeof io === 'undefined') return;
   try {
-    syncSocket = io();
+    syncSocket = io({ reconnection: true, reconnectionDelay: 1000, reconnectionAttempts: Infinity });
     syncSocket.on('sync:clients', ({ clients }) => { lastClients = clients; syncConnected = true; updateSyncIndicator(clients); });
     syncSocket.on('connect', () => { syncConnected = true; updateSyncIndicator(1, true); });
     syncSocket.on('disconnect', () => { syncConnected = false; updateSyncIndicator(0, false); });
@@ -1556,16 +1562,37 @@ function connectSync() {
       try {
         const tasks = [loadDashboard(), loadMaterials(), loadMovements(), loadLowStock(), loadCategories(), loadTools()];
         if (state.user && state.user.role === 'ADMIN') tasks.push(loadUsers());
-        await Promise.all(tasks);
+        await Promise.allSettled(tasks);
         renderApp();
         showToast(`Sincronizado: cambios recibidos desde otro dispositivo`);
       } catch (error) {
         console.warn('Sync refresh error', error);
       }
     });
+    // Si la pestaña estaba dormida, se sincroniza al volver
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        keepAwake();
+        if (!syncSocket || !syncSocket.connected) syncSocket.connect();
+        loadAll().then(renderApp).catch(() => {});
+      }
+    });
+    window.addEventListener('online', () => { if (syncSocket && !syncSocket.connected) syncSocket.connect(); });
+    keepAwake();
   } catch (error) {
     console.warn('No se pudo iniciar la sincronización en vivo', error);
   }
+}
+
+// Evita que el equipo/celular suspenda la pantalla mientras se usa el sistema
+let wakeLock = null;
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch { /* no soportado */ }
 }
 
 function updateSyncIndicator(clients, connected) {
