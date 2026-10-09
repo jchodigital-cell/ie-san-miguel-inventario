@@ -1,30 +1,137 @@
-# JCHO Inventario Ferretería
+# JCHO Inventario Ferretería — IE San Miguel
 
-## Módulo de Herramientas
+Sistema web de control de **herramientas** y **material de ferretería** para la Institución Educativa San Miguel.
+Funciona en computador y celular, **sincroniza entre dispositivos** y **trabaja sin internet**.
 
-Registra las herramientas existentes y las que ingresen, con código, marca, serial, estado (BUENA/REGULAR/MALA/MANTENIMIENTO), ubicación, responsable y costo. Incluye historial de movimientos: INGRESO, PRESTAMO, DEVOLUCION, REVISION y BAJA. También aparece en el Dashboard (total y novedades) y se sincroniza en vivo entre PC y celular.
+- 🌐 **Web publicada (GitHub Pages + Firebase):** https://jchodigital-cell.github.io/ie-san-miguel-inventario/
+- 🖥️ **Versión local (Node + SQLite):** `http://localhost:3000` — acceso directo en el Escritorio
+- 📄 **Informe técnico:** `Informe_Tecnico_JCHO_IE_San_Miguel.pdf`
 
-## Institución
+---
 
-Institución Educativa San Miguel
+## 1. Módulos del sistema
 
-## Tecnologías
+| Módulo | Qué hace |
+|---|---|
+| **Inicio de sesión** | Acceso por usuario y contraseña con roles |
+| **Dashboard** | Totales de materiales, alertas de stock, herramientas y movimientos |
+| **Inventario** | Material de ferretería: CRUD, filtros, stock mínimo, alertas BAJO/AGOTADO |
+| **Herramientas** | Herramientas existentes y futuras: código, marca, **serial**, estado, ubicación, responsable, costo e historial |
+| **Entradas / Salidas** | Movimientos de materiales con actualización automática de stock |
+| **Kardex** | Historial por material con saldo resultante |
+| **Reportes** | **3 submódulos independientes** (ver sección 3) |
+| **Usuarios** | Alta, edición y activación de usuarios (solo ADMIN) |
+| **Configuración** | Nombre de la institución y logos (institución y marca JCHO) |
+| **Versiones (GitHub)** | Rama, commits y estado del repositorio (solo ADMIN) |
 
-- Node.js
-- Express
-- Socket.io (sincronización en vivo entre PC y celular)
-- SQLite con better-sqlite3
-- JWT
-- bcryptjs
-- ExcelJS
-- PDFKit
-- HTML5, CSS3 y JavaScript vanilla (responsive, PWA)
-- Git / GitHub (control de versiones integrado)
+### Módulo de Herramientas (detalle)
 
-## Instalación
+- Estados: `BUENA`, `REGULAR`, `MALA`, `MANTENIMIENTO`.
+- Movimientos con historial: `INGRESO`, `PRESTAMO`, `DEVOLUCION`, `REVISION`, `BAJA`.
+- El préstamo asigna responsable automáticamente; la revisión pasa la herramienta a `MANTENIMIENTO` y la baja la marca como `MALA`.
+- Columna **Serial** visible en tabla, reportes, Excel y PDF.
 
-1. Clona o descarga el proyecto.
-2. En la raíz del proyecto ejecuta:
+---
+
+## 2. Roles y permisos
+
+| Rol | Usuario | Contraseña | Permisos |
+|---|---|---|---|
+| ADMIN | `admin` | `admin123` | Todo: usuarios, configuración, categorías, inventario, herramientas, movimientos, reportes, versiones |
+| ALMACENISTA | `almacenista` | `almacen123` | Inventario, herramientas, movimientos, kardex, reportes y **editar categorías** |
+| RECTOR | `rector` | `rector123` | Solo consulta: Dashboard, Inventario, Herramientas, Kardex y Reportes |
+
+---
+
+## 3. Reportes separados por módulo
+
+En **Reportes** existen tres bloques independientes. Cada uno permite **seleccionar** (checkboxes) qué registros exportar:
+
+| Submódulo | Contenido | Botones |
+|---|---|---|
+| **Material de Ferretería** | Materiales con stock y estado | EXPORTAR EXCEL · IMPRIMIR · DESCARGAR PDF |
+| **Herramientas** | Herramientas con serial y estado | EXPORTAR EXCEL · IMPRIMIR · DESCARGAR PDF |
+| **Bajas** | Materiales agotados + herramientas dadas de baja | EXPORTAR EXCEL · IMPRIMIR · DESCARGAR PDF |
+
+- **IMPRIMIR** abre una vista aislada con **solo ese módulo** (encabezado, logo y tabla del reporte).
+- **DESCARGAR PDF** genera un archivo PDF con **solo ese módulo**; el texto se ajusta a cada columna (no se sobrepone).
+
+---
+
+## 4. Funcionamiento sin internet (offline-first)
+
+La versión web está diseñada para trabajar con **poco o ningún internet**:
+
+1. **Primera visita con internet:** se instala la app (PWA) y se descargan las librerías de Excel y PDF.
+2. **Sin internet:** se puede iniciar sesión, registrar materiales y herramientas, hacer movimientos, ver kardex, generar reportes y exportar a Excel/PDF. Todo se guarda en el equipo.
+3. **Indicador de estado** en la barra superior:
+   - `● En vivo · sincronizado con la nube`
+   - `● Sin internet · N cambio(s) pendiente(s) de sincronizar`
+   - `● Reconectando (intento N)`
+4. **Al volver el internet:** los cambios pendientes se envían automáticamente y se confirma con el aviso
+   *"Internet restablecido: cambios guardados y sincronizados"*.
+
+> **Buena práctica:** evita que dos equipos trabajen sin conexión al mismo tiempo. La base local del PC (`data/inventory.db`) funciona 100% offline y sirve como plan B.
+
+### El sistema no se duerme
+
+- Wake Lock API: la pantalla no se apaga mientras el sistema está abierto.
+- La sincronización sigue activa (consulta cada 5 segundos) y reconecta de forma indefinida.
+- Al volver a la pestaña se sincroniza inmediatamente.
+- Los módulos se cargan de forma independiente: si uno falla, el resto sigue funcionando.
+
+---
+
+## 5. Sincronización entre equipos
+
+- **Versión web:** Firebase Realtime Database (`ie-san-miguel-inventario-default-rtdb`), documento `/inventario`.
+- **Versión local:** Socket.io (evento `data:changed`) entre dispositivos de la misma red.
+
+Para pasar los datos de la nube a la base local del PC:
+
+```bash
+node scripts/importar-nube.js herramientas   # solo herramientas
+node scripts/importar-nube.js todo          # categorías, materiales, movimientos y herramientas
+```
+
+---
+
+## 6. Tecnologías
+
+- Node.js, Express, Socket.io, SQLite (better-sqlite3), JWT, bcryptjs
+- ExcelJS (Excel), PDFKit (PDF local), jsPDF (PDF en la web)
+- HTML5, CSS3, JavaScript vanilla — responsive y PWA
+- Firebase Realtime Database, Git, GitHub y GitHub Pages
+
+---
+
+## 7. Estructura del proyecto
+
+```text
+backend/src/server.js     Servidor Express + Socket.io + rutas API y exportaciones
+backend/src/db.js         Esquema SQLite (institución, usuarios, categorías, materiales,
+                          movimientos, herramientas y tool_movements)
+backend/src/auth.js       JWT, bcrypt y control de acceso por roles
+backend/src/seed.js       Usuarios iniciales y logos por defecto
+frontend/                 Interfaz de la versión local de escritorio
+docs/                     Versión publicada en GitHub Pages (app.js, index.html, styles.css,
+                          manifest, service worker e íconos)
+scripts/importar-nube.js  Importa datos de Firebase a la base local
+scripts/generar-informe.js Genera el informe técnico en PDF
+iniciar.bat               Acceso directo de escritorio (reinicia el servidor si se cae)
+```
+
+---
+
+## 8. Instalación y uso
+
+### Versión web (recomendada)
+
+1. Abre https://jchodigital-cell.github.io/ie-san-miguel-inventario/
+2. Inicia sesión (con internet la primera vez).
+3. Menú del navegador → **Agregar a pantalla de inicio**.
+
+### Versión local
 
 ```bash
 npm install
@@ -32,118 +139,41 @@ npm run seed
 npm run dev
 ```
 
-3. Abre el sistema en:
+O haz doble clic en el acceso directo **JCHO Inventario Ferreteria** del Escritorio
+(`iniciar.bat` reinicia el servidor automáticamente si se detiene).
 
-```text
-http://localhost:3000
-```
+---
 
-## Usuarios iniciales
+## 9. Publicación y control de versiones
 
-- Usuario: `admin`
-  - Contraseña: `admin123`
-  - Rol: `ADMIN`
-
-- Usuario: `almacenista`
-  - Contraseña: `almacen123`
-  - Rol: `ALMACENISTA`
-
-- Usuario: `rector`
-  - Contraseña: `rector123`
-  - Rol: `RECTOR`
-  - Permisos: solo consulta (Dashboard, Inventario, Kardex y Reportes)
-
-## Roles y permisos
-
-### ADMIN
-- Administra usuarios
-- Crea y modifica materiales y categorías
-- Registra entradas, salidas y ajustes
-- Consulta inventario, Kardex, movimientos y alertas
-- Genera reportes, PDF y Excel
-- Configura la institución y el logo
-
-### ALMACENISTA
-- Inicia sesión
-- Consulta inventario y materiales
-- Registra entradas y salidas
-- Consulta Kardex, movimientos y alertas
-- Genera reportes, PDF y Excel
-- No puede administrar usuarios ni configurar la institución
-
-## Configuración del logo
-
-1. Inicia sesión como administrador.
-2. Ingresa a Configuración.
-3. Sube una imagen en formato PNG, JPG o JPEG.
-4. Guarda los cambios.
-5. El logo se usará en el encabezado, el login y los reportes exportados.
-
-Se recomienda usar imágenes pequeñas para mantener el archivo ligero.
-
-## Acceso desde el celular (misma red WiFi)
-
-1. Ejecuta `npm run dev` en la PC.
-2. Averigua la IP local de la PC (en Windows: `ipconfig`, busca "Dirección IPv4").
-3. En el celular abre el navegador y entra a `http://<IP-DE-LA-PC>:3000`.
-4. También puedes "Agregar a pantalla de inicio" para usarlo como app (PWA).
-
-## Sincronización en vivo PC ↔ Celular
-
-Cuando un usuario registra, edita o elimina datos desde cualquier dispositivo, todos los demás dispositivos conectados se actualizan automáticamente (Socket.io). En la barra superior se muestra el indicador "● En vivo · N dispositivo(s) conectado(s)".
-
-## Control de versiones (GitHub)
-
-El módulo **Versiones (GitHub)** del menú (rol ADMIN) muestra la rama actual, los cambios pendientes y los últimos commits. Para subir el proyecto a GitHub:
-
-```bash
-git remote add origin https://github.com/TU_USUARIO/TU_REPOSITORIO.git
-git branch -M main
-git push -u origin main
-```
-
-Después de cada mejora:
+Repositorio: https://github.com/jchodigital-cell/ie-san-miguel-inventario
+Ramas: `main` y `principal` — GitHub Pages publica desde `principal/docs`.
 
 ```bash
 git add .
 git commit -m "Descripción del cambio"
-git push
+git push origin main
 ```
 
-## Acceso directo de escritorio
+El módulo **Versiones (GitHub)** del sistema muestra la rama, los cambios pendientes y los últimos commits.
 
-Hay un acceso directo **JCHO Inventario Ferreteria** en el escritorio. Al abrirlo:
+---
 
-1. Ejecuta el seed si es la primera vez.
-2. Inicia el servidor.
-3. Abre el navegador en `http://localhost:3000`.
+## 10. Respaldo
 
-También puedes ejecutar manualmente el archivo `iniciar.bat` de la carpeta del proyecto.
-
-## Respaldo de SQLite
-
-El archivo de base de datos principal se encuentra en:
-
-```text
-data/inventory.db
-```
-
-Puedes respaldarlo con un comando como:
+- Base local: `data/inventory.db`
 
 ```bash
 copy data\inventory.db data\inventory-backup.db
 ```
 
-En Linux o macOS:
+- Nube: los datos están en Firebase y se pueden exportar a Excel desde el módulo Reportes.
 
-```bash
-cp data/inventory.db data/inventory-backup.db
-```
+---
 
-## Comandos útiles
+## 11. Seguridad
 
-```bash
-npm install
-npm run seed
-npm run dev
-```
+- Contraseñas cifradas: `bcryptjs` (local) y `SHA-256` (web).
+- Tokens JWT en la versión local.
+- Reglas de Firebase que limitan el acceso al nodo `/inventario` con validación básica.
+- HTTPS en la versión publicada.
