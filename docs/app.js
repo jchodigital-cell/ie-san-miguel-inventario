@@ -58,13 +58,52 @@ function normalizeCloudData(data) {
   return normalized;
 }
 
+// ===== TRABAJO SIN INTERNET (offline-first) =====
+// Los cambios se guardan siempre en el equipo y se envían a la nube
+// apenas vuelve la conexión. Nada se pierde si se cae el internet.
+let pendingChanges = 0;
+let isPushing = false;
+
+function pendingKey() {
+  return 'ie-sync-pending';
+}
+
+function loadPending() {
+  pendingChanges = Number(localStorage.getItem(pendingKey()) || 0);
+}
+
+function markPending(delta) {
+  pendingChanges = Math.max(0, pendingChanges + delta);
+  if (pendingChanges === 0) localStorage.removeItem(pendingKey());
+  else localStorage.setItem(pendingKey(), String(pendingChanges));
+  updateSyncIndicator();
+}
+
+async function pushToCloud() {
+  const response = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cloudData),
+  });
+  if (!response.ok) throw new Error('Firebase respondió ' + response.status);
+}
+
 async function cloudLoad() {
+  loadPending();
   try {
     const response = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
     const data = await response.json();
     if (data && data.institution) {
-      cloudData = normalizeCloudData(data);
-      localVersion = data.lastUpdated || 0;
+      // Si hay cambios locales sin sincronizar, no se sobrescriben
+      if (pendingChanges === 0) {
+        cloudData = normalizeCloudData(data);
+        localVersion = data.lastUpdated || 0;
+      } else {
+        cloudData = normalizeCloudData(data);
+        localVersion = Math.max(data.lastUpdated || 0, cloudData.lastUpdated || 0);
+        await pushToCloud().then(() => markPending(-pendingChanges)).catch(() => {});
+      }
+      localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
     } else {
       cloudData = await defaultCloudData();
       await cloudSave();
@@ -82,15 +121,14 @@ async function cloudSave() {
   localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
   lastLocalChangeAt = Date.now();
   try {
-    await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cloudData),
-    });
+    await pushToCloud();
     lastCloudError = null;
+    if (pendingChanges > 0) markPending(-pendingChanges);
   } catch (error) {
     lastCloudError = error;
+    markPending(1); // queda en cola hasta que vuelva el internet
   }
+  updateSyncIndicator();
 }
 
 function computeStatus(stock, stockMinimo) {
@@ -1512,7 +1550,7 @@ async function handleInstitutionSubmit(event) {
 async function exportExcel() {
   try {
     if (typeof ExcelJS === 'undefined') {
-      alert('No se pudo cargar la librería de Excel. Verifica tu conexión a internet.');
+      alert('No se pudo cargar la librería de Excel. Conéctate a internet una vez para instalarla y después el sistema funciona sin internet.');
       return;
     }
     const institution = state.institution;
@@ -1576,7 +1614,7 @@ async function exportExcel() {
 async function exportToolsExcel() {
   try {
     if (typeof ExcelJS === 'undefined') {
-      alert('No se pudo cargar la librería de Excel. Verifica tu conexión a internet.');
+      alert('No se pudo cargar la librería de Excel. Conéctate a internet una vez para instalarla y después el sistema funciona sin internet.');
       return;
     }
     const ids = new Set(Array.from(document.querySelectorAll('.tool-export-check:checked')).map((cb) => Number(cb.value)));
@@ -1752,7 +1790,7 @@ async function downloadBajasPdf() {
 async function exportBajasExcel() {
   try {
     if (typeof ExcelJS === 'undefined') {
-      alert('No se pudo cargar la librería de Excel. Verifica tu conexión a internet.');
+      alert('No se pudo cargar la librería de Excel. Conéctate a internet una vez para instalarla y después el sistema funciona sin internet.');
       return;
     }
     const checked = Array.from(document.querySelectorAll('.baja-export-check:checked'));
@@ -2246,11 +2284,27 @@ function handleVisibility() {
 }
 
 async function refreshFromCloud() {
+  if (isPushing) return;
   try {
+    // 1) Si hay cambios locales sin internet, primero se envían a la nube
+    if (pendingChanges > 0) {
+      isPushing = true;
+      try {
+        await pushToCloud();
+        markPending(-pendingChanges);
+        showToast('Internet restablecido: cambios guardados y sincronizados');
+      } catch {
+        isPushing = false;
+        setSyncOnline(false, ++pollFailures);
+        return;
+      }
+      isPushing = false;
+    }
+
     const response = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
     const data = await response.json();
     pollFailures = 0;
-    if (data && data.lastUpdated && data.lastUpdated > localVersion) {
+    if (data && data.lastUpdated && data.lastUpdated > localVersion && pendingChanges === 0) {
       if (state.modal) return; // no interrumpir si hay una ventana abierta
       cloudData = normalizeCloudData(data);
       localVersion = data.lastUpdated;
@@ -2268,18 +2322,30 @@ async function refreshFromCloud() {
   }
 }
 
+function updateSyncIndicator() {
+  if (!syncConnected) return; // se conserva el estado de reconexión
+  const el = document.getElementById('sync-indicator');
+  if (!el) return;
+  if (pendingChanges > 0) {
+    el.textContent = `● Sin internet · ${pendingChanges} cambio(s) pendiente(s) de sincronizar`;
+    el.className = 'sync-indicator offline';
+  } else {
+    el.textContent = '● En vivo · sincronizado con la nube';
+    el.className = 'sync-indicator online';
+  }
+}
+
 function setSyncOnline(online, failures = 0) {
   syncConnected = online;
   const el = document.getElementById('sync-indicator');
   if (!el) return;
   if (online) {
-    el.textContent = '● En vivo · sincronizado con la nube';
-    el.className = 'sync-indicator online';
-  } else {
-    const cache = (() => { try { return localStorage.getItem('ie-inventario-cache') ? ' · datos guardados en este equipo' : ''; } catch { return ''; } })();
-    el.textContent = failures > 2 ? `● Reconectando (intento ${failures})${cache}` : `● Sin conexión a la nube${cache}`;
-    el.className = 'sync-indicator offline';
+    updateSyncIndicator();
+    return;
   }
+  const cache = (() => { try { return localStorage.getItem('ie-inventario-cache') ? ' · datos guardados en este equipo' : ''; } catch { return ''; } })();
+  el.textContent = failures > 2 ? `● Reconectando (intento ${failures})${cache}` : `● Sin conexión a la nube${cache}`;
+  el.className = 'sync-indicator offline';
 }
 
 function connectSync() {
@@ -2311,6 +2377,10 @@ function showToast(text) {
   try {
     await cloudLoad();
     connectSync();
+    loadPending();
+    if (pendingChanges > 0) {
+      showToast('Trabajando sin conexión: los cambios se guardarán en este equipo');
+    }
     if (!localStorage.getItem('token')) {
       await loadInstitution();
       renderLogin();
