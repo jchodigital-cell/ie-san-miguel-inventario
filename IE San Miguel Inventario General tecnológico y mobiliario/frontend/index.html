@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>IE San Miguel · Inventario General Tecnológico y Mobiliario</title>
+    <meta name="theme-color" content="#083764" />
+    <meta name="description" content="Sistema de control general de inventario tecnológico y mobiliario - IE San Miguel Payande - San Luis" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!-- Socket.io para sincronización en tiempo real -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+
+    <!-- Service Worker para PWA y funcionamiento offline -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('sw.js').then((reg) => {
+            console.log('SW registrado:', reg.scope);
+          }).catch((err) => {
+            console.log('Error registro SW:', err);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>

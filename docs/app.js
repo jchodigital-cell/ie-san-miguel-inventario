@@ -93,6 +93,10 @@ async function cloudLoad() {
   try {
     const response = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
     const data = await response.json();
+    // Un error de permisos NO significa base vacía: no se pisa la información
+    if (!response.ok || (data && data.error)) {
+      throw new Error((data && data.error) || `HTTP ${response.status}`);
+    }
     if (data && data.institution) {
       // Si hay cambios locales sin sincronizar, no se sobrescriben
       if (pendingChanges === 0) {
@@ -2303,6 +2307,9 @@ async function refreshFromCloud() {
 
     const response = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
     const data = await response.json();
+    if (!response.ok || (data && data.error)) {
+      throw new Error((data && data.error) || `HTTP ${response.status}`);
+    }
     pollFailures = 0;
     if (data && data.lastUpdated && data.lastUpdated > localVersion && pendingChanges === 0) {
       if (state.modal) return; // no interrumpir si hay una ventana abierta

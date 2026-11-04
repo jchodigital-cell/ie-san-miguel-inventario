@@ -1,0 +1,21 @@
+{
+  "name": "ie-san-miguel-inventario-general",
+  "version": "2.0.0",
+  "description": "Sistema de control general de inventario tecnológico y mobiliario - IE San Miguel Payande - San Luis",
+  "main": "backend/src/server.js",
+  "scripts": {
+    "dev": "node backend/src/server.js",
+    "seed": "node backend/src/seed.js",
+    "init-db": "node backend/src/init-db.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.11.0",
+    "pdfkit": "^0.15.0",
+    "socket.io": "^4.8.4"
+  }
+}
