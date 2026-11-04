@@ -63,6 +63,9 @@ function normalizeCloudData(data) {
 // apenas vuelve la conexión. Nada se pierde si se cae el internet.
 let pendingChanges = 0;
 let isPushing = false;
+// true = se conoce el estado real de la nube (lectura exitosa o caché previa).
+// false = nunca se pudo leer la nube: NO se debe escribir encima a ciegas.
+let cloudStateVerified = false;
 
 function pendingKey() {
   return 'ie-sync-pending';
@@ -98,6 +101,7 @@ async function cloudLoad() {
       throw new Error((data && data.error) || `HTTP ${response.status}`);
     }
     if (data && data.institution) {
+      cloudStateVerified = true;
       // Si hay cambios locales sin sincronizar, no se sobrescriben
       if (pendingChanges === 0) {
         cloudData = normalizeCloudData(data);
@@ -109,12 +113,16 @@ async function cloudLoad() {
       }
       localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
     } else {
+      // Lectura exitosa y nube vacía: sí corresponde crear los datos por defecto
+      cloudStateVerified = true;
       cloudData = await defaultCloudData();
       await cloudSave();
     }
   } catch (error) {
     lastCloudError = error;
     const cached = localStorage.getItem('ie-inventario-cache');
+    // Solo se confía en el caché si viene de una lectura real anterior de la nube
+    cloudStateVerified = Boolean(cached);
     cloudData = cached ? normalizeCloudData(JSON.parse(cached)) : await defaultCloudData();
   }
 }
@@ -125,6 +133,24 @@ async function cloudSave() {
   localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
   lastLocalChangeAt = Date.now();
   try {
+    // Si nunca se pudo leer la nube, primero se verifica su contenido real
+    // para no sobrescribir datos existentes con esta copia local.
+    if (!cloudStateVerified) {
+      const probe = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
+      const remote = await probe.json();
+      if (!probe.ok || (remote && remote.error)) {
+        throw new Error((remote && remote.error) || `HTTP ${probe.status}`);
+      }
+      if (remote && remote.institution) {
+        // La nube sí tiene datos: se adopta esa información, no se pisa
+        cloudData = normalizeCloudData(remote);
+        localVersion = remote.lastUpdated || 0;
+        localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
+        cloudStateVerified = true;
+        return;
+      }
+      cloudStateVerified = true; // nube realmente vacía
+    }
     await pushToCloud();
     lastCloudError = null;
     if (pendingChanges > 0) markPending(-pendingChanges);
@@ -2294,6 +2320,23 @@ async function refreshFromCloud() {
     if (pendingChanges > 0) {
       isPushing = true;
       try {
+        // Nunca se escribe a ciegas: si no se conoce el contenido de la nube, se lee antes
+        if (!cloudStateVerified) {
+          const probe = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
+          const remote = await probe.json();
+          if (!probe.ok || (remote && remote.error)) throw new Error((remote && remote.error) || 'sin acceso a la nube');
+          if (remote && remote.institution) {
+            cloudData = normalizeCloudData(remote); // la nube tiene datos: se adopta, no se pisa
+            localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
+            cloudStateVerified = true;
+            markPending(-pendingChanges);
+            showToast('Sincronizado: datos recibidos desde la nube');
+            isPushing = false;
+            setSyncOnline(true);
+            return;
+          }
+          cloudStateVerified = true;
+        }
         await pushToCloud();
         markPending(-pendingChanges);
         showToast('Internet restablecido: cambios guardados y sincronizados');
@@ -2311,6 +2354,7 @@ async function refreshFromCloud() {
       throw new Error((data && data.error) || `HTTP ${response.status}`);
     }
     pollFailures = 0;
+    cloudStateVerified = true;
     if (data && data.lastUpdated && data.lastUpdated > localVersion && pendingChanges === 0) {
       if (state.modal) return; // no interrumpir si hay una ventana abierta
       cloudData = normalizeCloudData(data);

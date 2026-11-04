@@ -1,4 +1,4 @@
-const CACHE_NAME = 'inventario-san-miguel-v7';
+const CACHE_NAME = 'inventario-san-miguel-v8';
 const APP_SHELL = [
   './',
   './index.html',
