@@ -4,7 +4,7 @@ const { Server } = require('socket.io');
 const { execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { db, computeStatus } = require('./db');
+const { db, computeStatus, backupDatabase } = require('./db');
 const { authMiddleware, requireRole, signToken, comparePasswords, hashPassword } = require('./auth');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
@@ -1475,4 +1475,6 @@ app.get('*', (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Servidor ejecutándose en http://localhost:${PORT}`);
   console.log('Para usar desde otro dispositivo en la misma red, abre: http://<IP-DE-ESTA-PC>:' + PORT);
+  // Copia de seguridad de la base local en cada arranque (se conservan las 7 más recientes)
+  backupDatabase();
 });

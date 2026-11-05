@@ -55,7 +55,172 @@ function normalizeCloudData(data) {
     lastUpdated: 0,
   };
   const normalized = Object.assign({}, base, data);
+  // Los respaldos viven solo en la nube: no se guardan en la caché local
+  delete normalized._respaldos;
   return normalized;
+}
+
+// ============================================================
+// SINCRONIZACIÓN SEGURA (nunca se pierde información)
+// ------------------------------------------------------------
+// 1) FUSIÓN antes de escribir: se unen los datos de la nube y
+//    del equipo; gana el registro más reciente. Ningún equipo
+//    puede borrar lo que otro creó.
+// 2) TUMBAS (tombstones): al eliminar un registro se marca con
+//    la fecha de borrado; la fusión lo respeta y no lo resucita.
+// 3) RESPALDO AUTOMÁTICO: antes de escribir se guarda una copia
+//    del estado previo de la nube en /inventario/_respaldos
+//    (se conservan las 5 copias más recientes).
+// ============================================================
+const SYNC_COLLECTIONS = ['users', 'categories', 'materials', 'movements', 'tools', 'tool_movements'];
+const TOMBSTONE_TTL = 180 * 24 * 3600 * 1000; // las tumbas se limpian a los 180 días
+const MAX_CLOUD_BACKUPS = 5;
+
+function recordTime(rec) {
+  return Date.parse((rec && (rec.updated_at || rec.created_at)) || '') || 0;
+}
+
+function tombKey(collection, id) {
+  return collection + ':' + id;
+}
+
+function markDeleted(collection, id) {
+  if (!cloudData._borrados) cloudData._borrados = {};
+  cloudData._borrados[tombKey(collection, id)] = Date.now();
+}
+
+function markCreated(collection, id) {
+  // Si se reutiliza un id borrado antes, se limpia su tumba
+  if (cloudData._borrados) delete cloudData._borrados[tombKey(collection, id)];
+}
+
+function fillEmpty(doc) {
+  const out = Object.assign({}, doc || {});
+  SYNC_COLLECTIONS.forEach((c) => { if (!Array.isArray(out[c])) out[c] = []; });
+  return out;
+}
+
+function pickNewer(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const ta = recordTime(a);
+  const tb = recordTime(b);
+  if (tb > ta) return b;
+  if (ta > tb) return a;
+  // Empate: determinista para que todos los equipos decidan igual
+  return JSON.stringify(b) > JSON.stringify(a) ? b : a;
+}
+
+function pickInstitution(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const aLogo = !!(a.logo_data || a.brand_logo_data);
+  const bLogo = !!(b.logo_data || b.brand_logo_data);
+  if (aLogo !== bLogo) return aLogo ? a : b; // gana la que conserve el logo
+  return pickNewer(a, b);
+}
+
+// Unión de las tumbas de ambos lados (la más reciente gana), sin pasarse de TTL
+function mergeTombstones(remote, local) {
+  const out = {};
+  const now = Date.now();
+  [remote, local].forEach((src) => {
+    const t = (src && src._borrados) || {};
+    Object.keys(t).forEach((k) => {
+      const ts = Number(t[k]) || 0;
+      if (now - ts <= TOMBSTONE_TTL && (!out[k] || ts > out[k])) out[k] = ts;
+    });
+  });
+  return out;
+}
+
+// Fusión: unión por id, gana el updated_at más reciente, respeta tumbas.
+function mergeCloudDocs(remote, local) {
+  const rem = remote || {};
+  const loc = local || {};
+  const tombs = mergeTombstones(rem, loc);
+  const out = {};
+  SYNC_COLLECTIONS.forEach((coll) => {
+    const map = new Map();
+    const addAll = (arr) => {
+      (Array.isArray(arr) ? arr : []).forEach((rec) => {
+        if (!rec || rec.id === undefined || rec.id === null) return;
+        const key = String(rec.id);
+        const prev = map.get(key);
+        map.set(key, prev ? pickNewer(prev, rec) : rec);
+      });
+    };
+    addAll(rem[coll]);
+    addAll(loc[coll]);
+    out[coll] = [...map.values()].filter((rec) => {
+      const ts = tombs[tombKey(coll, rec.id)];
+      return !(ts && ts >= recordTime(rec));
+    });
+  });
+  out.institution = pickInstitution(rem.institution, loc.institution);
+  out._borrados = tombs;
+  out.lastUpdated = Math.max(Number(rem.lastUpdated) || 0, Number(loc.lastUpdated) || 0);
+  // Los respaldos de la nube se conservan tal cual (se agregan aparte al escribir)
+  if (rem._respaldos) out._respaldos = rem._respaldos;
+  else if (loc._respaldos) out._respaldos = loc._respaldos;
+  return out;
+}
+
+// Comparación de contenido real (ignora lastUpdated y respaldos;
+// solo importan los registros — vacio_confirmado sí se compara para
+// que la marca desaparezca de la nube en la siguiente escritura)
+function canon(x) {
+  if (Array.isArray(x)) return x.map(canon);
+  if (x && typeof x === 'object') {
+    const o = {};
+    Object.keys(x).sort().forEach((k) => {
+      if (k !== '_respaldos' && k !== 'lastUpdated') o[k] = canon(x[k]);
+    });
+    return o;
+  }
+  return x;
+}
+
+function docsDataEqual(a, b) {
+  return JSON.stringify(canon(fillEmpty(a))) === JSON.stringify(canon(fillEmpty(b)));
+}
+
+function countRecords(doc) {
+  const d = fillEmpty(doc);
+  return SYNC_COLLECTIONS.reduce((sum, c) => sum + d[c].length, 0);
+}
+
+// Respaldo solo si algo se perdería o si pasó más de 1 día desde el último
+function shouldBackup(remote, merged) {
+  if (!remote || !remote.institution) return false;
+  if (countRecords(merged) < countRecords(remote)) return true;
+  const last = Number(localStorage.getItem('ie-last-backup') || 0);
+  return Date.now() - last > 24 * 3600 * 1000;
+}
+
+// Copia del estado previo de la nube, sin logos (pesan mucho) ni respaldos anidados
+function addCloudBackup(currentBackups, remoteDoc) {
+  const snap = JSON.parse(JSON.stringify(remoteDoc));
+  delete snap._respaldos;
+  if (snap.institution) {
+    snap.institution.logo_data = null;
+    snap.institution.brand_logo_data = null;
+  }
+  const all = Object.assign({}, currentBackups || {});
+  all['resp-' + Date.now()] = snap;
+  // Orden numérico por fecha (las claves son "resp-<milisegundos>")
+  const keys = Object.keys(all).sort((a, b) => Number(a.slice(5) || 0) - Number(b.slice(5) || 0));
+  while (keys.length > MAX_CLOUD_BACKUPS) delete all[keys.shift()];
+  return all;
+}
+
+// Solo se conservan respaldos con formato "resp-<fecha>" (limpia claves de prueba)
+function sanitizeBackups(obj) {
+  const out = {};
+  Object.keys(obj || {}).forEach((k) => {
+    if (k.startsWith('resp-') && obj[k] && typeof obj[k] === 'object') out[k] = obj[k];
+  });
+  return out;
 }
 
 // ===== TRABAJO SIN INTERNET (offline-first) =====
@@ -82,13 +247,63 @@ function markPending(delta) {
   updateSyncIndicator();
 }
 
+// Escribe en la nube SIEMPRE leyendo primero, fusionando y respaldando.
+// Nunca se pisa la información: lo que exista en la nube se conserva.
 async function pushToCloud() {
-  const response = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`, {
+  // 1) Lectura del estado real de la nube (nunca se escribe a ciegas)
+  const res = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
+  const remote = await res.json();
+  if (!res.ok || (remote && remote.error)) {
+    throw new Error((remote && remote.error) || `HTTP ${res.status}`);
+  }
+  cloudStateVerified = true;
+  const remoteHasData = Boolean(remote && remote.institution);
+
+  // 2) Fusión: unión de nube + equipo, gana el registro más reciente,
+  //    se respetan las tumbas (borrados). Nada se pierde de ningún lado.
+  const merged = remoteHasData ? mergeCloudDocs(remote, cloudData) : fillEmpty(Object.assign({}, cloudData));
+
+  const payload = Object.assign({}, merged);
+  delete payload._respaldos; // se agrega aparte, solo desde la nube viva
+  payload.lastUpdated = Date.now();
+
+  // 3) Respaldo automático del estado previo antes de cualquier escritura
+  let backups = sanitizeBackups(remote && remote._respaldos);
+  if (remoteHasData && shouldBackup(remote, merged)) {
+    backups = addCloudBackup(backups, remote);
+    localStorage.setItem('ie-last-backup', String(Date.now()));
+  }
+  if (Object.keys(backups).length > 0) payload._respaldos = backups;
+
+  // 4) Regla de las reglas de Firebase: si una colección queda vacía
+  //    existiendo antes, se marca la confirmación explícita del usuario
+  //    con fecha (las reglas solo aceptan marcas recientes: < 24 horas).
+  const emptied = SYNC_COLLECTIONS.some((c) => Array.isArray(remote[c]) && remote[c].length > 0
+    && Array.isArray(payload[c]) && payload[c].length === 0);
+  if (emptied) payload.vacio_confirmado = Date.now();
+
+  // 5) ¿Hay cambios reales? Si no, no se escribe (evita saturar la nube)
+  if (remoteHasData && docsDataEqual(payload, remote)) {
+    cloudData = merged;
+    cloudData.lastUpdated = payload.lastUpdated;
+    localVersion = Math.max(localVersion, Number(remote.lastUpdated) || 0);
+    localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
+    return;
+  }
+
+  // 6) Escritura del documento fusionado (incluye _respaldos para no borrarlos)
+  const put = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(cloudData),
+    body: JSON.stringify(payload),
   });
-  if (!response.ok) throw new Error('Firebase respondió ' + response.status);
+  if (!put.ok) throw new Error('Firebase respondió ' + put.status);
+
+  // 7) Se adopta la fusión localmente
+  cloudData = merged;
+  cloudData.lastUpdated = payload.lastUpdated;
+  localVersion = payload.lastUpdated;
+  localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
 }
 
 async function cloudLoad() {
@@ -102,16 +317,16 @@ async function cloudLoad() {
     }
     if (data && data.institution) {
       cloudStateVerified = true;
-      // Si hay cambios locales sin sincronizar, no se sobrescriben
-      if (pendingChanges === 0) {
-        cloudData = normalizeCloudData(data);
-        localVersion = data.lastUpdated || 0;
-      } else {
-        cloudData = normalizeCloudData(data);
-        localVersion = Math.max(data.lastUpdated || 0, cloudData.lastUpdated || 0);
+      // FUSIÓN en vez de reemplazo: lo local no se descarta nunca
+      const merged = mergeCloudDocs(data, cloudData);
+      const extras = !docsDataEqual(merged, data); // datos locales que la nube no tiene
+      cloudData = merged;
+      localVersion = Number(data.lastUpdated) || 0;
+      localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
+      if (pendingChanges > 0 || extras) {
+        // Autocuración: lo que falte en la nube se sube de vuelta
         await pushToCloud().then(() => markPending(-pendingChanges)).catch(() => {});
       }
-      localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
     } else {
       // Lectura exitosa y nube vacía: sí corresponde crear los datos por defecto
       cloudStateVerified = true;
@@ -133,24 +348,8 @@ async function cloudSave() {
   localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
   lastLocalChangeAt = Date.now();
   try {
-    // Si nunca se pudo leer la nube, primero se verifica su contenido real
-    // para no sobrescribir datos existentes con esta copia local.
-    if (!cloudStateVerified) {
-      const probe = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
-      const remote = await probe.json();
-      if (!probe.ok || (remote && remote.error)) {
-        throw new Error((remote && remote.error) || `HTTP ${probe.status}`);
-      }
-      if (remote && remote.institution) {
-        // La nube sí tiene datos: se adopta esa información, no se pisa
-        cloudData = normalizeCloudData(remote);
-        localVersion = remote.lastUpdated || 0;
-        localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
-        cloudStateVerified = true;
-        return;
-      }
-      cloudStateVerified = true; // nube realmente vacía
-    }
+    // pushToCloud lee la nube, fusiona y respalda antes de escribir:
+    // no hace falta (ni es seguro) un sondeo aparte.
     await pushToCloud();
     lastCloudError = null;
     if (pendingChanges > 0) markPending(-pendingChanges);
@@ -324,6 +523,7 @@ async function localApi(path, method, body) {
       updated_at: new Date().toISOString(),
     };
     cloudData.users.push(user);
+    markCreated('users', user.id);
     return saveAnd({ id: user.id, username: user.username, full_name: user.full_name, role: user.role, is_active: user.is_active, created_at: user.created_at });
   }
   if (path.startsWith('/users/') && method === 'PUT') {
@@ -346,6 +546,7 @@ async function localApi(path, method, body) {
     if (user.role === 'ADMIN' && user.is_active === 1 && cloudData.users.filter((u) => u.role === 'ADMIN' && u.is_active === 1).length <= 1) throw new Error('No se puede dejar sin administradores activos');
     if (cloudData.movements.some((m) => m.user_id === id)) throw new Error('No se puede eliminar un usuario con movimientos registrados');
     cloudData.users = cloudData.users.filter((u) => u.id !== id);
+    markDeleted('users', id); // tumba: no resucita al sincronizar
     return saveAnd({ deleted: true });
   }
 
@@ -364,8 +565,9 @@ async function localApi(path, method, body) {
   if (path === '/categories' && method === 'POST') {
     if (!body.name || !String(body.name).trim()) throw new Error('El nombre de la categoría es obligatorio');
     if (cloudData.categories.some((c) => c.name === String(body.name).trim())) throw new Error('La categoría ya existe');
-    const category = { id: nextId(cloudData.categories), name: String(body.name).trim(), created_at: new Date().toISOString() };
+    const category = { id: nextId(cloudData.categories), name: String(body.name).trim(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
     cloudData.categories.push(category);
+    markCreated('categories', category.id);
     return saveAnd(category);
   }
   if (path.startsWith('/categories/') && method === 'PUT') {
@@ -376,6 +578,7 @@ async function localApi(path, method, body) {
     const duplicate = cloudData.categories.find((c) => c.name === String(body.name).trim() && c.id !== id);
     if (duplicate) throw new Error('La categoría ya existe');
     category.name = String(body.name).trim();
+    category.updated_at = new Date().toISOString(); // desempate de fusión: gana lo editado más reciente
     return saveAnd(category);
   }
   if (path.startsWith('/categories/') && method === 'DELETE') {
@@ -383,6 +586,7 @@ async function localApi(path, method, body) {
     const inUse = cloudData.materials.some((m) => m.category_id === id);
     if (inUse) throw new Error('No se puede eliminar una categoría con materiales asociados');
     cloudData.categories = cloudData.categories.filter((c) => c.id !== id);
+    markDeleted('categories', id);
     return saveAnd({ deleted: true });
   }
 
@@ -408,6 +612,7 @@ async function localApi(path, method, body) {
       updated_at: new Date().toISOString(),
     };
     cloudData.materials.push(material);
+    markCreated('materials', material.id);
     return saveAnd(withCategory(material));
   }
   if (path.startsWith('/materials/') && method === 'PUT') {
@@ -432,6 +637,7 @@ async function localApi(path, method, body) {
     const id = Number(path.split('/').pop());
     if (cloudData.movements.some((m) => m.material_id === id)) throw new Error('No se puede eliminar un material con movimientos registrados');
     cloudData.materials = cloudData.materials.filter((m) => m.id !== id);
+    markDeleted('materials', id);
     return saveAnd({ deleted: true });
   }
 
@@ -461,6 +667,7 @@ async function localApi(path, method, body) {
       created_at: new Date().toISOString(),
     };
     cloudData.movements.push(movement);
+    markCreated('movements', movement.id);
     material.stock = updatedStock;
     material.status = computeStatus(updatedStock, material.stock_minimo);
     material.updated_at = new Date().toISOString();
@@ -486,6 +693,7 @@ async function localApi(path, method, body) {
     newMaterial.stock = newStock;
     newMaterial.status = computeStatus(newStock, newMaterial.stock_minimo);
     movement.material_id = newMaterialId;
+    movement.updated_at = new Date().toISOString(); // desempate de fusión
     return saveAnd({ updated: true });
   }
   if (path.startsWith('/movements/') && method === 'DELETE') {
@@ -502,6 +710,7 @@ async function localApi(path, method, body) {
       material.status = computeStatus(updatedStock, material.stock_minimo);
     }
     cloudData.movements = cloudData.movements.filter((m) => m.id !== id);
+    markDeleted('movements', id);
     return saveAnd({ deletedId: id });
   }
 
@@ -526,7 +735,10 @@ async function localApi(path, method, body) {
       updated_at: new Date().toISOString(),
     };
     cloudData.tools.push(tool);
-    cloudData.tool_movements.push({ id: nextId(cloudData.tool_movements), tool_id: tool.id, type: 'INGRESO', responsible: tool.responsible, observation: 'Herramienta registrada en el sistema', user_id: state.user.id, created_at: new Date().toISOString() });
+    markCreated('tools', tool.id);
+    const entryId = nextId(cloudData.tool_movements);
+    cloudData.tool_movements.push({ id: entryId, tool_id: tool.id, type: 'INGRESO', responsible: tool.responsible, observation: 'Herramienta registrada en el sistema', user_id: state.user.id, created_at: new Date().toISOString() });
+    markCreated('tool_movements', entryId);
     return saveAnd(tool);
   }
   if (path.startsWith('/tools/') && method === 'PUT') {
@@ -552,8 +764,11 @@ async function localApi(path, method, body) {
   }
   if (path.startsWith('/tools/') && method === 'DELETE') {
     const id = Number(path.split('/')[2]);
+    const removed = cloudData.tool_movements.filter((m) => m.tool_id === id);
     cloudData.tools = cloudData.tools.filter((t) => t.id !== id);
     cloudData.tool_movements = cloudData.tool_movements.filter((m) => m.tool_id !== id);
+    markDeleted('tools', id);
+    removed.forEach((m) => markDeleted('tool_movements', m.id));
     return saveAnd({ deleted: true });
   }
   if (path.endsWith('/movements') && method === 'POST') {
@@ -561,7 +776,9 @@ async function localApi(path, method, body) {
     const tool = cloudData.tools.find((t) => t.id === toolId);
     if (!tool) throw new Error('Herramienta no encontrada');
     if (!['INGRESO', 'PRESTAMO', 'DEVOLUCION', 'REVISION', 'BAJA'].includes(body.type)) throw new Error('Tipo de movimiento inválido');
-    cloudData.tool_movements.push({ id: nextId(cloudData.tool_movements), tool_id: toolId, type: body.type, responsible: body.responsible || null, observation: body.observation || null, user_id: state.user.id, created_at: new Date().toISOString() });
+    const tmId = nextId(cloudData.tool_movements);
+    cloudData.tool_movements.push({ id: tmId, tool_id: toolId, type: body.type, responsible: body.responsible || null, observation: body.observation || null, user_id: state.user.id, created_at: new Date().toISOString() });
+    markCreated('tool_movements', tmId);
     if (body.type === 'PRESTAMO') tool.responsible = body.responsible || tool.responsible;
     if (body.type === 'DEVOLUCION') tool.responsible = null;
     if (body.type === 'BAJA') tool.state = 'MALA';
@@ -1339,7 +1556,144 @@ function renderConfiguration() {
         </div>
       </form>
     </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <div class="section-header">
+        <h3>Respaldo y recuperación de la información</h3>
+      </div>
+      <p style="margin-bottom:10px;">
+        La sincronización es por <strong>fusión segura</strong>: cada equipo une su información con la nube
+        y gana siempre el registro más reciente; <strong>ningún equipo puede borrar lo que otro creó</strong>.
+        Antes de cada escritura se guarda una copia automática del estado previo de la nube
+        (se conservan las 5 más recientes) y los borrados se marcan para no resucitar.
+      </p>
+      <div class="form-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+        <button class="primary-btn" id="export-backup-btn" type="button">Descargar respaldo (.json)</button>
+        <button class="secondary-btn" id="import-backup-btn" type="button">Importar respaldo (.json)</button>
+        <input type="file" id="import-backup-input" accept="application/json,.json" style="display:none;" />
+        <button class="secondary-btn" id="refresh-backups-btn" type="button">Actualizar respaldos de la nube</button>
+      </div>
+      <div id="backup-status" style="margin-top:10px; font-size:0.92em; color:var(--muted);"></div>
+      <div id="cloud-backups" style="margin-top:8px;"></div>
+    </div>
   `;
+}
+
+// ---- Respaldo: descarga / importación / restauración desde la nube ----
+
+function downloadBackupFile() {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const payload = JSON.stringify(cloudData, null, 2);
+  const blob = new Blob([payload], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `respaldo-ie-san-miguel-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  showToast('Respaldo descargado correctamente');
+}
+
+async function importBackupFile(file) {
+  const text = await file.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    showToast('El archivo no es un respaldo válido (JSON inválido)');
+    return;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    showToast('El archivo no tiene el formato de un respaldo');
+    return;
+  }
+  const incoming = countRecords(parsed);
+  if (incoming === 0 && !parsed.institution) {
+    showToast('El respaldo no contiene información');
+    return;
+  }
+  if (!confirm(`Se fusionarán ${incoming} registro(s) del respaldo con la información actual. Los datos actuales no se pierden. ¿Continuar?`)) return;
+  // Fusión: nunca se pisa lo actual; lo del respaldo se suma (más reciente gana)
+  cloudData = mergeCloudDocs(parsed, cloudData);
+  await cloudSave();
+  showToast(`Respaldo importado: ${incoming} registro(s) fusionados`);
+  await loadAll();
+  renderApp();
+}
+
+async function loadCloudBackups() {
+  const box = document.getElementById('cloud-backups');
+  const status = document.getElementById('backup-status');
+  if (status) {
+    const last = Number(localStorage.getItem('ie-last-backup') || 0);
+    status.textContent = `Registros actuales: ${countRecords(cloudData)} · Último respaldo automático de este equipo: `
+      + (last ? new Date(last).toLocaleString() : 'aún no se ha creado uno en este equipo');
+  }
+  if (!box) return;
+  box.innerHTML = 'Cargando respaldos de la nube...';
+  try {
+    const res = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}/_respaldos.json`);
+    const data = await res.json();
+    if (!res.ok || (data && data.error)) throw new Error((data && data.error) || 'sin acceso');
+    const clean = sanitizeBackups(data); // ignora claves de prueba o corruptas
+    const keys = Object.keys(clean).sort().reverse();
+    state.backupsCache = clean;
+    if (keys.length === 0) {
+      box.innerHTML = '<p style="color:var(--muted);">Todavía no hay respaldos automáticos en la nube. Se crean solos antes de escrituras con riesgo y cada 24 horas.</p>';
+      return;
+    }
+    box.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha del respaldo</th><th>Registros</th><th>Acción</th></tr></thead>
+          <tbody>
+            ${keys.map((k) => {
+              const snap = clean[k];
+              const date = k.startsWith('resp-') && !isNaN(Number(k.slice(5))) ? new Date(Number(k.slice(5))) : new Date(k);
+              const label = isNaN(date.getTime()) ? k : date.toLocaleString();
+              return `<tr>
+                <td>${escapeHtml(label)}</td>
+                <td>${countRecords(snap)}</td>
+                <td><button class="secondary-btn restore-backup-btn" data-key="${escapeHtml(k)}" type="button">Restaurar</button></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p style="color:var(--muted); font-size:0.9em; margin-top:8px;">
+        Restaurar = volver a poner los registros de esa copia sin borrar nada de lo actual.
+      </p>`;
+    box.querySelectorAll('.restore-backup-btn').forEach((btn) => {
+      btn.addEventListener('click', () => restoreCloudBackup(btn.dataset.key));
+    });
+  } catch (error) {
+    box.innerHTML = `<p style="color:var(--muted);">No se pudieron leer los respaldos de la nube: ${escapeHtml(error.message || String(error))}</p>`;
+  }
+}
+
+function restoreCloudBackup(key) {
+  const backup = state.backupsCache && state.backupsCache[key];
+  if (!backup) { showToast('Respaldo no disponible'); return; }
+  const incoming = countRecords(backup);
+  if (!confirm(`Restaurar ${incoming} registro(s) de este respaldo?\n\nNo se borra nada actual: solo vuelven los registros que ya no existen. Los datos más recientes se conservan.`)) return;
+  // Restauración explícita: se limpian las tumbas de los registros que
+  // aparecen en el respaldo (estaban vivos cuando se tomó la copia).
+  const tombs = cloudData._borrados || {};
+  SYNC_COLLECTIONS.forEach((coll) => {
+    (Array.isArray(backup[coll]) ? backup[coll] : []).forEach((rec) => {
+      if (rec && rec.id !== undefined) delete tombs[tombKey(coll, rec.id)];
+    });
+  });
+  cloudData._borrados = tombs;
+  cloudData = mergeCloudDocs(backup, cloudData);
+  cloudSave().then(() => {
+    showToast(`Respaldo restaurado: ${incoming} registro(s) recuperados`);
+    loadCloudBackups();
+    if (localStorage.getItem('token')) {
+      loadAll().then(() => renderApp()).catch(() => {});
+    }
+  });
 }
 
 function renderVersiones() {
@@ -1473,6 +1827,15 @@ function bindCommonActions() {
   document.getElementById('institution-form')?.addEventListener('submit', handleInstitutionSubmit);
   document.getElementById('logo-input')?.addEventListener('change', readLogoFile);
   document.getElementById('brand-logo-input')?.addEventListener('change', readBrandLogoFile);
+  document.getElementById('export-backup-btn')?.addEventListener('click', downloadBackupFile);
+  document.getElementById('import-backup-btn')?.addEventListener('click', () => document.getElementById('import-backup-input')?.click());
+  document.getElementById('import-backup-input')?.addEventListener('change', (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (file) importBackupFile(file).catch((err) => showToast('Error al importar: ' + (err.message || err)));
+    event.target.value = '';
+  });
+  document.getElementById('refresh-backups-btn')?.addEventListener('click', loadCloudBackups);
+  if (document.getElementById('cloud-backups')) loadCloudBackups();
   document.querySelectorAll('[data-kardex-id]').forEach((btn) => btn.addEventListener('click', () => loadKardexAndRender(btn.dataset.kardexId)));
   document.querySelectorAll('[data-material-edit]').forEach((btn) => btn.addEventListener('click', () => openMaterialModal(Number(btn.dataset.materialEdit))));
   document.querySelectorAll('[data-material-delete]').forEach((btn) => {
@@ -2316,27 +2679,11 @@ function handleVisibility() {
 async function refreshFromCloud() {
   if (isPushing) return;
   try {
-    // 1) Si hay cambios locales sin internet, primero se envían a la nube
+    // 1) Si hay cambios locales sin internet, primero se envían a la nube.
+    //    pushToCloud lee + fusiona + respalda: nunca pisa datos existentes.
     if (pendingChanges > 0) {
       isPushing = true;
       try {
-        // Nunca se escribe a ciegas: si no se conoce el contenido de la nube, se lee antes
-        if (!cloudStateVerified) {
-          const probe = await fetch(`${FIREBASE_URL}/${CLOUD_DOC}.json`);
-          const remote = await probe.json();
-          if (!probe.ok || (remote && remote.error)) throw new Error((remote && remote.error) || 'sin acceso a la nube');
-          if (remote && remote.institution) {
-            cloudData = normalizeCloudData(remote); // la nube tiene datos: se adopta, no se pisa
-            localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
-            cloudStateVerified = true;
-            markPending(-pendingChanges);
-            showToast('Sincronizado: datos recibidos desde la nube');
-            isPushing = false;
-            setSyncOnline(true);
-            return;
-          }
-          cloudStateVerified = true;
-        }
         await pushToCloud();
         markPending(-pendingChanges);
         showToast('Internet restablecido: cambios guardados y sincronizados');
@@ -2357,9 +2704,16 @@ async function refreshFromCloud() {
     cloudStateVerified = true;
     if (data && data.lastUpdated && data.lastUpdated > localVersion && pendingChanges === 0) {
       if (state.modal) return; // no interrumpir si hay una ventana abierta
-      cloudData = normalizeCloudData(data);
+      // FUSIÓN en vez de reemplazo: lo local no se descarta nunca
+      const merged = mergeCloudDocs(data, cloudData);
+      const heal = !docsDataEqual(merged, data); // la nube tiene menos que nosotros
+      cloudData = merged;
       localVersion = data.lastUpdated;
       localStorage.setItem('ie-inventario-cache', JSON.stringify(cloudData));
+      if (heal) {
+        // Autocuración: si la nube perdió registros, se recuperan solos
+        await pushToCloud().catch(() => {});
+      }
       if (localStorage.getItem('token')) {
         await loadAll();
         renderApp();

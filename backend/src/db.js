@@ -129,4 +129,34 @@ function initializeDatabase() {
 
 initializeDatabase();
 
-module.exports = { db, computeStatus, initializeDatabase };
+// ============================================================
+// RESPALDO AUTOMÁTICO DE LA BASE LOCAL (SQLite)
+// ------------------------------------------------------------
+// Al arrancar el servidor se guarda una copia de inventory.db en
+// data/backups/ (una por día) y se conservan las 7 más recientes.
+// Así una corrupción o borrado accidental nunca significa pérdida.
+// ============================================================
+async function backupDatabase(reason = 'arranque del servidor') {
+  try {
+    const backupsDir = path.join(dataDir, 'backups');
+    fs.mkdirSync(backupsDir, { recursive: true });
+    const stamp = new Date().toISOString().slice(0, 10); // AAAA-MM-DD
+    const target = path.join(backupsDir, `inventory-${stamp}.db`);
+    if (!fs.existsSync(target)) {
+      await db.backup(target); // copia consistente incluso con WAL activo
+      console.log(`[respaldo] Copia de seguridad creada (${reason}): ${path.relative(process.cwd(), target)}`);
+    }
+    // Conservar solo las 7 copias diarias más recientes
+    const files = fs.readdirSync(backupsDir)
+      .filter((f) => /^inventory-\d{4}-\d{2}-\d{2}\.db$/.test(f))
+      .sort();
+    while (files.length > 7) {
+      fs.unlinkSync(path.join(backupsDir, files.shift()));
+    }
+  } catch (error) {
+    // Un fallo de respaldo no debe impedir arrancar el sistema
+    console.warn('[respaldo] No se pudo crear la copia de seguridad:', error.message);
+  }
+}
+
+module.exports = { db, computeStatus, initializeDatabase, backupDatabase };

@@ -1,0 +1,15 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "inventario": {
+      ".read": true,
+      ".write": true,
+      ".validate": "newData.child('institution').exists() && newData.child('users').hasChildren() && newData.child('lastUpdated').isNumber() && (!data.child('tools').exists() || newData.child('tools').exists() || newData.child('vacio_confirmado').val() > now - 86400000) && (!data.child('materials').exists() || newData.child('materials').exists() || newData.child('vacio_confirmado').val() > now - 86400000) && (!data.child('categories').exists() || newData.child('categories').exists() || newData.child('vacio_confirmado').val() > now - 86400000) && (!data.child('movements').exists() || newData.child('movements').exists() || newData.child('vacio_confirmado').val() > now - 86400000) && (!data.child('tool_movements').exists() || newData.child('tool_movements').exists() || newData.child('vacio_confirmado').val() > now - 86400000) && (!data.child('users').hasChildren() || newData.child('users').hasChildren())",
+      "_respaldos": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}
