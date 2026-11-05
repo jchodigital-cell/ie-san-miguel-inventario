@@ -214,11 +214,12 @@ function addCloudBackup(currentBackups, remoteDoc) {
   return all;
 }
 
-// Solo se conservan respaldos con formato "resp-<fecha>" (limpia claves de prueba)
+// Solo se conservan respaldos con formato conocido: "resp-<fecha>" (automáticos)
+// y "pre-<fecha>" (copias de recuperación); se descartan claves de prueba
 function sanitizeBackups(obj) {
   const out = {};
   Object.keys(obj || {}).forEach((k) => {
-    if (k.startsWith('resp-') && obj[k] && typeof obj[k] === 'object') out[k] = obj[k];
+    if ((k.startsWith('resp-') || k.startsWith('pre-')) && obj[k] && typeof obj[k] === 'object') out[k] = obj[k];
   });
   return out;
 }
